@@ -217,7 +217,7 @@ private struct SplunkSearchStatusContent: Codable {
     }
 }
 
-private struct SplunkSearchResultsResponse: Codable {
+private struct SplunkSearchResultsResponse: Decodable {
     let results: [[String: Any]]
 
     init(from decoder: Decoder) throws {
