@@ -1,0 +1,57 @@
+<dashboard>
+  <label>Server Monitoring</label>
+  
+  <fieldset>
+    <input type="time" token="time">
+      <default>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+    
+    <input type="dropdown" token="index">
+      <label>Index</label>
+      <choice value="main">Main</choice>
+      <choice value="security">Security</choice>
+      <choice value="web">Web Logs</choice>
+      <default>main</default>
+      <prefix>index=</prefix>
+    </input>
+    
+    <input type="text" token="host">
+      <label>Host Filter</label>
+      <default>*</default>
+      <prefix>host=</prefix>
+    </input>
+  </fieldset>
+  
+  <row>
+    <panel>
+      <title>CPU Usage</title>
+      <chart>
+        <search>
+          <query>
+            $index$ $host$ sourcetype=cpu 
+            earliest=$time.earliest$ latest=$time.latest$
+            | timechart avg(cpu_percent) by host
+          </query>
+        </search>
+        <option name="charting.chart">line</option>
+      </chart>
+    </panel>
+    
+    <panel>
+      <title>Memory Usage</title>
+      <chart>
+        <search>
+          <query>
+            $index$ $host$ sourcetype=memory
+            earliest=$time.earliest$ latest=$time.latest$
+            | timechart avg(memory_percent) by host
+          </query>
+        </search>
+        <option name="charting.chart">area</option>
+      </chart>
+    </panel>
+  </row>
+</dashboard>
