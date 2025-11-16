@@ -71,3 +71,27 @@ public typealias SplunkSource = SplunkDataSource
 
 // Converters
 public typealias Converter = DashboardConverter
+
+// MARK: - Convenience Accessors
+
+extension DashboardKit {
+    /// Get the search execution monitor
+    @MainActor
+    public static var monitor: SearchExecutionMonitor {
+        SearchExecutionMonitor.shared
+    }
+
+    /// Get the credential manager
+    public static var credentials: CredentialManager {
+        get async {
+            await CredentialManager.shared
+        }
+    }
+
+    /// Get the CoreData manager
+    public static var manager: CoreDataManager {
+        get async {
+            await CoreDataManager.shared
+        }
+    }
+}
