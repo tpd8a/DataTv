@@ -2,7 +2,8 @@
 
 import ArgumentParser
 import Foundation
-import d8aTvCore
+import DashboardKit
+import d8aTvCore  // Temporary: for DashboardLoader and DashboardQueryEngine
 
 @available(macOS 26,tvOS 26,*)
 
