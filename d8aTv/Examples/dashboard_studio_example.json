@@ -1,0 +1,186 @@
+{
+  "title": "Server Monitoring Dashboard",
+  "description": "Real-time server performance metrics",
+  "visualizations": {
+    "viz_cpu": {
+      "type": "splunk.singlevalue",
+      "title": "CPU Usage",
+      "dataSources": {
+        "primary": "ds_cpu"
+      },
+      "options": {
+        "majorValue": "> primary | seriesByIndex(0)",
+        "trendValue": "> primary | seriesByIndex(0) | delta(-2)",
+        "sparklineValues": "> primary"
+      },
+      "context": {
+        "trendColorEditorConfig": [
+          {
+            "value": 0,
+            "to": 50,
+            "color": "#1C6B2D"
+          },
+          {
+            "value": 50,
+            "to": 80,
+            "color": "#F58F39"
+          },
+          {
+            "value": 80,
+            "color": "#9E2520"
+          }
+        ]
+      }
+    },
+    "viz_memory": {
+      "type": "splunk.singlevalue",
+      "title": "Memory Usage",
+      "dataSources": {
+        "primary": "ds_memory"
+      },
+      "options": {
+        "majorValue": "> primary | seriesByIndex(0)"
+      }
+    },
+    "viz_requests": {
+      "type": "splunk.line",
+      "title": "Requests Over Time",
+      "dataSources": {
+        "primary": "ds_requests"
+      },
+      "options": {
+        "xField": "_time",
+        "yFields": ["count"]
+      }
+    },
+    "viz_errors": {
+      "type": "splunk.table",
+      "title": "Recent Errors",
+      "dataSources": {
+        "primary": "ds_errors"
+      }
+    }
+  },
+  "dataSources": {
+    "ds_base": {
+      "type": "ds.search",
+      "options": {
+        "query": "index=main host=* sourcetype=metrics",
+        "queryParameters": {
+          "earliest": "$global_time.earliest$",
+          "latest": "$global_time.latest$"
+        }
+      }
+    },
+    "ds_cpu": {
+      "type": "ds.chain",
+      "extends": "ds_base",
+      "options": {
+        "query": "| stats avg(cpu_percent) as cpu_percent by _time | eval cpu_percent=round(cpu_percent,2)"
+      }
+    },
+    "ds_memory": {
+      "type": "ds.chain",
+      "extends": "ds_base",
+      "options": {
+        "query": "| stats avg(memory_percent) as memory_percent by _time | eval memory_percent=round(memory_percent,2)"
+      }
+    },
+    "ds_requests": {
+      "type": "ds.search",
+      "options": {
+        "query": "index=web sourcetype=access_combined | timechart count",
+        "queryParameters": {
+          "earliest": "$global_time.earliest$",
+          "latest": "$global_time.latest$"
+        }
+      }
+    },
+    "ds_errors": {
+      "type": "ds.search",
+      "options": {
+        "query": "index=web sourcetype=access_combined status>=400 | head 100 | table _time, host, status, uri, clientip",
+        "queryParameters": {
+          "earliest": "$global_time.earliest$",
+          "latest": "$global_time.latest$"
+        }
+      }
+    }
+  },
+  "layout": {
+    "type": "absolute",
+    "structure": [
+      {
+        "item": "input_time",
+        "type": "input",
+        "position": {
+          "x": 0,
+          "y": 0,
+          "w": 1200,
+          "h": 50
+        }
+      },
+      {
+        "item": "viz_cpu",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 60,
+          "w": 300,
+          "h": 200
+        }
+      },
+      {
+        "item": "viz_memory",
+        "type": "block",
+        "position": {
+          "x": 310,
+          "y": 60,
+          "w": 300,
+          "h": 200
+        }
+      },
+      {
+        "item": "viz_requests",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 270,
+          "w": 610,
+          "h": 300
+        }
+      },
+      {
+        "item": "viz_errors",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 580,
+          "w": 1200,
+          "h": 400
+        }
+      }
+    ],
+    "globalInputs": ["input_time"]
+  },
+  "inputs": {
+    "input_time": {
+      "type": "input.timerange",
+      "title": "Time Range",
+      "token": "global_time",
+      "defaultValue": "-60m@m,now"
+    }
+  },
+  "defaults": {
+    "dataSources": {
+      "ds.search": {
+        "options": {
+          "queryParameters": {
+            "latest": "$global_time.latest$",
+            "earliest": "$global_time.earliest$"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,7 +1,7 @@
 import Foundation
 import Combine
 import CoreData
-import d8aTvCore
+import DashboardKit
 
 /// Background worker that manages automatic refresh of dashboard searches
 /// Runs timers for searches with refresh intervals and executes them periodically

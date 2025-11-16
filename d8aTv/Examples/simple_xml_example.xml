@@ -1,0 +1,72 @@
+<form>
+  <label>Server Monitoring (Legacy)</label>
+  <description>Simple XML format dashboard</description>
+
+  <fieldset submitButton="false" autoRun="true">
+    <input type="time" token="time_range">
+      <label>Time Range</label>
+      <default>
+        <earliest>-60m@m</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+  </fieldset>
+
+  <row>
+    <panel>
+      <title>CPU Usage</title>
+      <single>
+        <search>
+          <query>index=main host=* sourcetype=metrics | stats avg(cpu_percent) as cpu_percent | eval cpu_percent=round(cpu_percent,2)</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="underLabel">Average CPU %</option>
+        <option name="drilldown">none</option>
+      </single>
+    </panel>
+
+    <panel>
+      <title>Memory Usage</title>
+      <single>
+        <search>
+          <query>index=main host=* sourcetype=metrics | stats avg(memory_percent) as memory_percent | eval memory_percent=round(memory_percent,2)</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="underLabel">Average Memory %</option>
+      </single>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Requests Over Time</title>
+      <chart>
+        <search>
+          <query>index=web sourcetype=access_combined | timechart count</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Count</option>
+      </chart>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Recent Errors</title>
+      <table>
+        <search>
+          <query>index=web sourcetype=access_combined status>=400 | head 100 | table _time, host, status, uri, clientip</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+        <option name="drilldown">row</option>
+        <option name="count">20</option>
+      </table>
+    </panel>
+  </row>
+</form>

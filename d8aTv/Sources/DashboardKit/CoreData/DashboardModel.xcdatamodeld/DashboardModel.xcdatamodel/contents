@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="22758" systemVersion="23F79" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+
+    <!-- Dashboard Entity -->
+    <entity name="Dashboard" representedClassName="Dashboard" syncable="YES">
+        <attribute name="id" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="title" attributeType="String"/>
+        <attribute name="dashboardDescription" optional="YES" attributeType="String"/>
+        <attribute name="formatType" attributeType="String" defaultValueString="dashboardStudio"/>
+        <attribute name="rawJSON" optional="YES" attributeType="String"/>
+        <attribute name="rawXML" optional="YES" attributeType="String"/>
+        <attribute name="createdAt" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="updatedAt" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="defaultsJSON" optional="YES" attributeType="String"/>
+        <relationship name="dataSources" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="DataSource" inverseName="dashboard" inverseEntity="DataSource"/>
+        <relationship name="visualizations" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="Visualization" inverseName="dashboard" inverseEntity="Visualization"/>
+        <relationship name="inputs" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="DashboardInput" inverseName="dashboard" inverseEntity="DashboardInput"/>
+        <relationship name="layout" optional="YES" maxCount="1" deletionRule="Cascade" destinationEntity="DashboardLayout" inverseName="dashboard" inverseEntity="DashboardLayout"/>
+        <relationship name="dataSourceConfig" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="DataSourceConfig" inverseName="dashboards" inverseEntity="DataSourceConfig"/>
+    </entity>
+
+    <!-- DataSource Entity (SPL queries, searches) -->
+    <entity name="DataSource" representedClassName="DataSource" syncable="YES">
+        <attribute name="id" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="sourceId" attributeType="String"/>
+        <attribute name="name" optional="YES" attributeType="String"/>
+        <attribute name="type" attributeType="String" defaultValueString="ds.search"/>
+        <attribute name="query" optional="YES" attributeType="String"/>
+        <attribute name="refresh" optional="YES" attributeType="String"/>
+        <attribute name="refreshType" optional="YES" attributeType="String"/>
+        <attribute name="optionsJSON" optional="YES" attributeType="String"/>
+        <attribute name="extendsId" optional="YES" attributeType="String"/>
+        <relationship name="dashboard" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Dashboard" inverseName="dataSources" inverseEntity="Dashboard"/>
+        <relationship name="executions" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="SearchExecution" inverseName="dataSource" inverseEntity="SearchExecution"/>
+        <relationship name="visualizations" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Visualization" inverseName="dataSource" inverseEntity="Visualization"/>
+    </entity>
+
+    <!-- Visualization Entity -->
+    <entity name="Visualization" representedClassName="Visualization" syncable="YES">
+        <attribute name="id" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="vizId" attributeType="String"/>
+        <attribute name="type" attributeType="String"/>
+        <attribute name="title" optional="YES" attributeType="String"/>
+        <attribute name="optionsJSON" optional="YES" attributeType="String"/>
+        <attribute name="contextJSON" optional="YES" attributeType="String"/>
+        <attribute name="encoding" optional="YES" attributeType="String"/>
+        <relationship name="dashboard" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Dashboard" inverseName="visualizations" inverseEntity="Dashboard"/>
+        <relationship name="dataSource" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="DataSource" inverseName="visualizations" inverseEntity="DataSource"/>
+        <relationship name="layoutItem" optional="YES" maxCount="1" deletionRule="Cascade" destinationEntity="LayoutItem" inverseName="visualization" inverseEntity="LayoutItem"/>
+    </entity>
+
+    <!-- Dashboard Layout -->
+    <entity name="DashboardLayout" representedClassName="DashboardLayout" syncable="YES">
+        <attribute name="id" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="type" attributeType="String" defaultValueString="absolute"/>
+        <attribute name="optionsJSON" optional="YES" attributeType="String"/>
+        <attribute name="globalInputs" optional="YES" attributeType="String"/>
+        <relationship name="dashboard" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Dashboard" inverseName="layout" inverseEntity="Dashboard"/>
+        <relationship name="layoutItems" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="LayoutItem" inverseName="layout" inverseEntity="LayoutItem"/>
+    </entity>
+
+    <!-- Layout Item (positioning) -->
+    <entity name="LayoutItem" representedClassName="LayoutItem" syncable="YES">
+        <attribute name="id" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="type" attributeType="String"/>
+        <attribute name="x" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="y" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="width" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="height" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="bootstrapWidth" optional="YES" attributeType="String"/>
+        <attribute name="position" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <relationship name="layout" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="DashboardLayout" inverseName="layoutItems" inverseEntity="DashboardLayout"/>
+        <relationship name="visualization" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Visualization" inverseName="layoutItem" inverseEntity="Visualization"/>
+        <relationship name="input" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="DashboardInput" inverseName="layoutItem" inverseEntity="DashboardInput"/>
+    </entity>
+
+    <!-- Dashboard Input (time pickers, filters) -->
+    <entity name="DashboardInput" representedClassName="DashboardInput" syncable="YES">
+        <attribute name="id" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="inputId" attributeType="String"/>
+        <attribute name="type" attributeType="String"/>
+        <attribute name="title" optional="YES" attributeType="String"/>
+        <attribute name="token" optional="YES" attributeType="String"/>
+        <attribute name="defaultValue" optional="YES" attributeType="String"/>
+        <attribute name="optionsJSON" optional="YES" attributeType="String"/>
+        <relationship name="dashboard" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Dashboard" inverseName="inputs" inverseEntity="Dashboard"/>
+        <relationship name="layoutItem" optional="YES" maxCount="1" deletionRule="Cascade" destinationEntity="LayoutItem" inverseName="input" inverseEntity="LayoutItem"/>
+    </entity>
+
+    <!-- Search Execution Tracking -->
+    <entity name="SearchExecution" representedClassName="SearchExecution" syncable="YES">
+        <attribute name="id" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="executionId" attributeType="String"/>
+        <attribute name="searchId" attributeType="String"/>
+        <attribute name="query" attributeType="String"/>
+        <attribute name="startTime" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="endTime" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="status" attributeType="String" defaultValueString="running"/>
+        <attribute name="resultCount" optional="YES" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="errorMessage" optional="YES" attributeType="String"/>
+        <relationship name="dataSource" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="DataSource" inverseName="executions" inverseEntity="DataSource"/>
+        <relationship name="results" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="SearchResult" inverseName="execution" inverseEntity="SearchResult"/>
+        <relationship name="dataSourceConfig" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="DataSourceConfig" inverseName="executions" inverseEntity="DataSourceConfig"/>
+    </entity>
+
+    <!-- Search Results (historical data) -->
+    <entity name="SearchResult" representedClassName="SearchResult" syncable="YES">
+        <attribute name="id" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="timestamp" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="resultJSON" attributeType="String"/>
+        <attribute name="rowIndex" optional="YES" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <relationship name="execution" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="SearchExecution" inverseName="results" inverseEntity="SearchExecution"/>
+    </entity>
+
+    <!-- Data Source Configuration (Splunk/Elastic/Prometheus instances) -->
+    <entity name="DataSourceConfig" representedClassName="DataSourceConfig" syncable="YES">
+        <attribute name="id" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="name" attributeType="String"/>
+        <attribute name="type" attributeType="String"/>
+        <attribute name="host" attributeType="String"/>
+        <attribute name="port" optional="YES" attributeType="Integer 32" defaultValueString="8089" usesScalarValueType="YES"/>
+        <attribute name="username" optional="YES" attributeType="String"/>
+        <attribute name="authToken" optional="YES" attributeType="String"/>
+        <attribute name="isDefault" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="configJSON" optional="YES" attributeType="String"/>
+        <attribute name="createdAt" attributeType="Date" usesScalarValueType="NO"/>
+        <relationship name="dashboards" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Dashboard" inverseName="dataSourceConfig" inverseEntity="Dashboard"/>
+        <relationship name="executions" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="SearchExecution" inverseName="dataSourceConfig" inverseEntity="SearchExecution"/>
+    </entity>
+
+</model>

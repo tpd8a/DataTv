@@ -1,213 +1,406 @@
-# d8aTv
+# DashboardKit
 
-**Splunk Dashboard Parser and Token Manager for tvOS**
+A ground-up Swift framework for managing dashboards from multiple sources and formats. Supports Splunk Dashboard Studio, legacy SimpleXML, and extensible architecture for Elastic and Prometheus dashboards with comprehensive CoreData persistence.
 
-A pure Swift implementation for parsing Splunk SimpleXML dashboards and rendering them natively on Apple TV.
+## Overview
 
-## Features
+DashboardKit is a Swift 6 framework designed for macOS v26 and tvOS v26 that provides:
 
-- 📊 **Dashboard Parser** - Parse Splunk SimpleXML dashboards with full fidelity
-- 🎯 **Token Management** - Extract, resolve, and manage dashboard tokens with dependency tracking
-- 💾 **State Persistence** - CoreData-backed token state with session management
-- 🆔 **Smart ID Generation** - Collision-resistant entity IDs with automatic fallbacks
-- 🔧 **CLI Tool** - Complete command-line interface for testing and development
-- 📱 **Multi-Platform** - Supports tvOS, iOS, and macOS
+- **Dashboard Studio Support**: Parse, validate, and manage Splunk 10+ Dashboard Studio JSON format
+- **Legacy SimpleXML Support**: Full backward compatibility with SimpleXML dashboards
+- **Format Conversion**: Bidirectional conversion between Dashboard Studio and SimpleXML
+- **CoreData Persistence**: Robust storage of dashboard configurations with full fidelity
+- **Execution Tracking**: Historical tracking of search executions and results
+- **Multi-Source Support**: Modular architecture supporting Splunk, Elastic, and Prometheus
+- **Layout Systems**: Support for both absolute/grid positioning and bootstrap-style layouts
 
 ## Architecture
 
-d8aTv uses a multi-process architecture designed for tvOS:
+### CoreData Schema
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      tvOS Swift App (GUI)                    │
-│  • SwiftUI Interface                                         │
-│  • Swift Charts Rendering                                    │
-│  • Token Input Controls                                      │
-└────────────────┬────────────────────────────────────────────┘
-                 │
-┌────────────────┴────────────────────────────────────────────┐
-│  ┌───────────────────────────────┐  ┌────────────────────┐  │
-│  │   Dashboard Parser Service    │  │  Data Engine       │  │
-│  │  • Discovers dashboards       │  │  • Search executor │  │
-│  │  • Parses SimpleXML/JSON      │  │  • Token resolver  │  │
-│  │  • Extracts structure         │  │  • Result cacher   │  │
-│  └───────────────────────────────┘  └────────────────────┘  │
-│                                                               │
-│                  ┌──────────────────────┐                    │
-│                  │   Shared CoreData    │                    │
-│                  └──────────────────────┘                    │
-└───────────────────────────────────────────────────────────── ┘
-```
+The framework uses a comprehensive CoreData model with the following entities:
 
-## Components
+- **Dashboard**: Top-level dashboard configuration (title, description, format type)
+- **DataSource**: SPL queries and search definitions (supports chaining with `ds.chain`)
+- **Visualization**: Chart, table, single value, and other visualization types
+- **DashboardLayout**: Layout configuration (absolute, grid, or bootstrap)
+- **LayoutItem**: Individual positioning for visualizations and inputs
+- **DashboardInput**: Time pickers, dropdowns, and other input controls
+- **SearchExecution**: Tracks when searches are executed with execution IDs
+- **SearchResult**: Historical results from searches (enables timeline features)
+- **DataSourceConfig**: Splunk/Elastic/Prometheus instance configurations
 
-### 1. TokenResolver
-Resolves tokens in search queries with full dependency resolution:
-- Circular dependency detection
-- Prefix/suffix application
-- Token validation
-- SHA256-based hashing for cache keys
+### Key Components
 
-### 2. SimpleXMLTokenExtractor
-Extracts tokens from Splunk dashboard XML:
-- All token types (time, dropdown, text, multiselect, etc.)
-- Form inputs, init blocks, and dynamic tokens
-- Dependency graph building
-- Configuration preservation
+#### Parsers
 
-### 3. TokenStateManager
-Manages token state with persistence:
-- CoreData storage
-- Combine publishers for reactive updates
-- Dirty tracking for re-execution
-- Session management
+- **DashboardStudioParser**: Parse Dashboard Studio JSON format (Splunk 10+)
+  - Supports CDATA-wrapped XML format for deployment
+  - Full validation of data source references and layout structure
+  - Serialization back to JSON
 
-### 4. EntityIDGenerator
-Generates collision-resistant IDs:
-- Smart fallback strategies
-- ID registry and collision detection
-- Deterministic hashing
-- Validation and sanitization
+- **SimpleXMLParser**: Parse legacy SimpleXML dashboards
+  - Bootstrap-style layout parsing
+  - Fieldset and input handling
+  - Panel and visualization extraction
 
-### 5. CLI Tool
-Complete command-line interface:
-- Parse dashboards
-- Manage tokens
-- Resolve queries
-- Run tests
-- Generate IDs
+#### Data Sources
 
-## Installation
+- **DataSourceProtocol**: Protocol for data source implementations
+- **SplunkDataSource**: Full Splunk REST API implementation
+  - Search job creation
+  - Status monitoring
+  - Result retrieval
+  - Token substitution
 
-### As a Library
+Easily extensible for Elastic and Prometheus.
 
-Add d8aTv to your `Package.swift`:
+#### Managers
 
-```swift
-dependencies: [
-    .package(url: "https://github.com/yourusername/d8aTv", from: "1.0.0")
-]
-```
+- **CoreDataManager**: Background worker for CoreData operations
+  - Dashboard persistence (both formats)
+  - Search execution tracking
+  - Historical result storage
+  - Data source registration
 
-### CLI Tool
+#### Converters
 
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/d8aTv
-cd d8aTv
-
-# Build
-swift build -c release
-
-# Install
-cp .build/release/d8atv-cli /usr/local/bin/
-```
+- **DashboardConverter**: Convert between formats
+  - SimpleXML → Dashboard Studio
+  - Dashboard Studio → SimpleXML (lossy)
+  - Type mapping and layout conversion
 
 ## Usage
 
-### Library Usage
+### Parsing a Dashboard Studio Dashboard
 
 ```swift
-import d8aTvCore
+import DashboardKit
 
-// Parse a dashboard
-let parser = SimpleXMLParser()
-let root = try parser.parse(xmlString: dashboardXML)
+// Initialize framework
+await DashboardKit.initialize()
 
-// Extract tokens
-let extractor = SimpleXMLTokenExtractor(dashboardID: "my_dashboard")
-let tokens = try extractor.extractTokens(from: root)
+// Parse Dashboard Studio JSON
+let parser = await DashboardStudioParser()
+let config = try await parser.parse(jsonString)
 
-// Manage state
-let stateManager = TokenStateManager(dashboardID: "my_dashboard")
-try stateManager.storeTokenDefinitions(tokens)
-try stateManager.initializeDefaults()
+// Validate configuration
+try await parser.validate(config)
 
-// Resolve queries
-let context = try stateManager.getTokenContext()
-let resolver = TokenResolver(context: context)
-let resolved = try resolver.resolve(query: "$index$ $host$ | stats count")
+// Save to CoreData
+let manager = await CoreDataManager.shared
+let dashboardId = try await manager.saveDashboard(config)
 ```
 
-### CLI Usage
+### Parsing a SimpleXML Dashboard
 
-```bash
-# Parse a dashboard
-d8atv-cli parse --file dashboard.xml --verbose
+```swift
+import DashboardKit
 
-# Manage tokens
-d8atv-cli tokens --dashboard-id my_dashboard --file dashboard.xml --initialize --list
+// Parse SimpleXML
+let parser = await SimpleXMLParser()
+let config = try await parser.parse(xmlString)
 
-# Resolve a query
-d8atv-cli resolve --dashboard-id my_dashboard --file dashboard.xml \
-    '$index$ $host$ | stats count'
+// Convert to Dashboard Studio format
+let converter = DashboardConverter()
+let studioConfig = converter.convertToStudio(config)
 
-# Run tests
-d8atv-cli test --suite all
-
-# Generate IDs
-d8atv-cli id --dashboard "Server Monitoring"
+// Save to CoreData
+let manager = await CoreDataManager.shared
+let dashboardId = try await manager.saveDashboard(studioConfig)
 ```
+
+### Executing Searches with Tracking
+
+```swift
+import DashboardKit
+
+// Create and register a Splunk data source
+let splunk = await SplunkDataSource(
+    host: "splunk.example.com",
+    port: 8089,
+    authToken: "your-bearer-token",
+    useSSL: true
+)
+
+let manager = await CoreDataManager.shared
+await manager.registerDataSource(splunk, withId: "splunk-prod")
+
+// Save data source configuration
+let configId = try await manager.saveDataSourceConfig(
+    name: "Production Splunk",
+    type: .splunk,
+    host: "splunk.example.com",
+    port: 8089,
+    authToken: "your-bearer-token",
+    isDefault: true
+)
+
+// Execute a search with tracking
+let executionId = try await manager.executeSearch(
+    dataSourceId: dataSourceUUID,
+    query: "search index=main | stats count by host",
+    parameters: SearchParameters(
+        earliestTime: "-24h",
+        latestTime: "now",
+        tokens: ["host": "web01"]
+    ),
+    dataSourceConfigId: configId
+)
+
+// Monitor search status
+let status = try await splunk.checkSearchStatus(executionId: executionId.uuidString)
+
+if status == .completed {
+    // Fetch results
+    let results = try await splunk.fetchResults(
+        executionId: executionId.uuidString,
+        offset: 0,
+        limit: 100
+    )
+
+    // Save results to CoreData for historical tracking
+    try await manager.updateSearchExecution(
+        executionId: executionId,
+        status: .completed,
+        results: results
+    )
+}
+```
+
+### Accessing Historical Data
+
+```swift
+import DashboardKit
+
+let manager = await CoreDataManager.shared
+
+// Fetch search history for a data source
+let history = try await manager.fetchSearchHistory(
+    dataSourceId: dataSourceUUID,
+    limit: 100
+)
+
+// Access historical results (timeline feature)
+for execution in history {
+    print("Execution at \(execution.startTime!)")
+    print("Status: \(execution.status!)")
+    print("Result count: \(execution.resultCount)")
+
+    // Access stored results
+    if let results = execution.results as? Set<SearchResult> {
+        for result in results.sorted(by: { $0.rowIndex < $1.rowIndex }) {
+            print(result.resultJSON!)
+        }
+    }
+}
+```
+
+## Dashboard Studio Format
+
+Dashboard Studio uses JSON with these core sections:
+
+### Visualizations
+
+```json
+{
+  "viz_cpu": {
+    "type": "splunk.singlevalue",
+    "title": "CPU Usage",
+    "dataSources": {
+      "primary": "ds_cpu"
+    },
+    "options": {
+      "majorValue": "> primary | seriesByIndex(0)"
+    }
+  }
+}
+```
+
+### Data Sources
+
+```json
+{
+  "ds_base": {
+    "type": "ds.search",
+    "options": {
+      "query": "index=main sourcetype=metrics"
+    }
+  },
+  "ds_cpu": {
+    "type": "ds.chain",
+    "extends": "ds_base",
+    "options": {
+      "query": "| stats avg(cpu_percent)"
+    }
+  }
+}
+```
+
+### Layout
+
+```json
+{
+  "layout": {
+    "type": "absolute",
+    "structure": [
+      {
+        "item": "viz_cpu",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 60,
+          "w": 300,
+          "h": 200
+        }
+      }
+    ]
+  }
+}
+```
+
+### Inputs
+
+```json
+{
+  "input_time": {
+    "type": "input.timerange",
+    "title": "Time Range",
+    "token": "global_time",
+    "defaultValue": "-60m@m,now"
+  }
+}
+```
+
+## SimpleXML Format
+
+Legacy SimpleXML uses bootstrap-style layout:
+
+```xml
+<form>
+  <label>Server Monitoring</label>
+  <fieldset>
+    <input type="time" token="time_range">
+      <label>Time Range</label>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <title>CPU Usage</title>
+      <single>
+        <search>
+          <query>index=main | stats avg(cpu_percent)</query>
+          <earliest>$time_range.earliest$</earliest>
+          <latest>$time_range.latest$</latest>
+        </search>
+      </single>
+    </panel>
+  </row>
+</form>
+```
+
+## Integration with SplTV
+
+This framework is designed to integrate with the SplTV GUI application, which:
+
+- Displays dashboards using the CoreData models
+- Extrapolates tokens from inputs
+- Manages search timers and refresh intervals
+- Passes searches to CoreDataManager for execution
+- Provides timeline views of historical search results
+
+The CoreDataManager acts as a background worker/helper making requests to Splunk instances, while SplTV handles the UI layer.
+
+## Extending to Other Data Sources
+
+To add support for Elastic or Prometheus:
+
+```swift
+public actor ElasticDataSource: DataSourceProtocol {
+    public let type: DataSourceType = .elastic
+
+    public func executeSearch(query: String, parameters: SearchParameters) async throws -> SearchExecutionResult {
+        // Implement Elastic search API
+    }
+
+    // Implement other protocol methods...
+}
+```
+
+Register the new data source:
+
+```swift
+let elastic = await ElasticDataSource(host: "elastic.example.com")
+await manager.registerDataSource(elastic, withId: "elastic-prod")
+```
+
+## Examples
+
+See the `Examples/` directory for complete dashboard examples:
+
+- `dashboard_studio_example.json`: Full Dashboard Studio dashboard with multiple visualizations
+- `simple_xml_example.xml`: Legacy SimpleXML dashboard
 
 ## Testing
 
+Run tests with:
+
 ```bash
-# Run all tests
 swift test
-
-# Run CLI tests
-d8atv-cli test --suite all
-
-# Run specific test suite
-d8atv-cli test --suite resolver
-d8atv-cli test --suite extractor
-d8atv-cli test --suite state
-d8atv-cli test --suite ids
 ```
 
-## Token Types Supported
-
-- ✅ **Time tokens** - With `.earliest` and `.latest` sub-tokens
-- ✅ **Dropdown** - Static and dynamic choices
-- ✅ **Text input**
-- ✅ **Multiselect** - With delimiter support
-- ✅ **Radio buttons**
-- ✅ **Checkbox**
-- ✅ **Link lists**
-- ✅ **Calculated tokens** - From `<init>` and `<set>` blocks
-
-## Roadmap
-
-- [ ] Complete Data Engine Service (search execution, caching)
-- [ ] Splunk REST API client
-- [ ] Dashboard Studio (JSON) support
-- [ ] SwiftUI tvOS viewer
-- [ ] Swift Charts visualization renderers
-- [ ] Search result transformers
-- [ ] Drilldown support
-- [ ] Real-time search support
-- [ ] Custom visualization support
+Tests cover:
+- Dashboard Studio parsing and validation
+- SimpleXML parsing
+- Format conversion
+- Data source chaining
+- Serialization and round-tripping
 
 ## Requirements
 
-- Swift 5.9+
-- macOS 13+ / iOS 16+ / tvOS 16+
-- Xcode 15+
-
-## Contributing
-
-Contributions are welcome! Please read our contributing guidelines before submitting PRs.
+- Swift 6.0+
+- macOS 14+
+- tvOS 17+
+- CoreData framework
 
 ## License
 
-MIT License - see LICENSE file for details
+Copyright © 2025. All rights reserved.
 
-## Author
+## Features Unique to This Implementation
 
-Built for parsing and rendering Splunk dashboards natively on Apple TV.
+### Historical Timeline
 
-## Acknowledgments
+Unlike web-based Splunk dashboards, this implementation stores all search results in CoreData, enabling:
 
-- Inspired by Splunk's SimpleXML dashboard format
-- Built with Swift's modern concurrency and Combine framework
-- Uses CoreData for persistent storage
+- Historical trending beyond web session lifetime
+- Offline access to previous search results
+- Timeline visualization of metric changes
+- Search result comparison over time
+
+### Data Source Awareness
+
+The CoreData schema is specifically designed to differentiate and track:
+
+- Different data source types (Splunk, Elastic, Prometheus)
+- Search execution metadata (execution ID, timestamps, status)
+- Chained data sources (Dashboard Studio `ds.chain` support)
+- Individual data source configurations with authentication
+
+### Dual Format Support
+
+Seamlessly work with both formats:
+
+- Parse legacy SimpleXML dashboards from existing Splunk instances
+- Convert them to Dashboard Studio format for modern features
+- Store both formats in the same CoreData model
+- Export to either format as needed
+
+## Future Enhancements
+
+- Elastic Search data source implementation
+- Prometheus data source implementation
+- Real-time search streaming
+- Dashboard templating
+- Export to PDF/image formats
+- Dashboard version control

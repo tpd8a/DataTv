@@ -1,0 +1,265 @@
+{
+  "_note": "Example of how the 'my_another' dashboard would be stored in new DashboardKit CoreData schema",
+  "_entityName": "Dashboard",
+  "_objectID": "x-coredata://NEW-UUID/Dashboard/p1",
+
+  "id": "550E8400-E29B-41D4-A716-446655440000",
+  "title": "Another DB",
+  "dashboardDescription": "Check1",
+  "formatType": "simpleXML",
+  "createdAt": "2025-11-14T20:13:10Z",
+  "updatedAt": "2025-11-14T20:13:10Z",
+
+  "rawXML": "<form version=\"1.1\" theme=\"dark\">...</form>",
+  "rawJSON": null,
+  "defaultsJSON": null,
+
+  "dataSourceConfig": {
+    "_entityName": "DataSourceConfig",
+    "_objectID": "x-coredata://NEW-UUID/DataSourceConfig/p1",
+    "id": "660E8400-E29B-41D4-A716-446655440001",
+    "name": "Default Splunk Instance",
+    "type": "splunk",
+    "host": "localhost",
+    "port": 8089,
+    "isDefault": true,
+    "createdAt": "2025-11-14T20:00:00Z"
+  },
+
+  "dataSources": [
+    {
+      "_entityName": "DataSource",
+      "_objectID": "x-coredata://NEW-UUID/DataSource/p1",
+      "id": "770E8400-E29B-41D4-A716-446655440001",
+      "sourceId": "base_new",
+      "name": "Base Search - File Analysis",
+      "type": "ds.search",
+      "query": "index=\"_internal\" source=*$filename$| stats count count(eval(match(_raw,\"INFO\"))) as info  count(eval(match(_raw,\"ERROR\"))) as error count(eval(match(_raw,\"WARN\"))) as warn by source host | sort - error |  head 4",
+      "refresh": "1m",
+      "refreshType": "delay",
+      "optionsJSON": "{\"queryParameters\":{\"earliest\":\"-24h@h\",\"latest\":\"now\"},\"tokenReferences\":[\"filename\"]}",
+      "extendsId": null,
+      "executions": [
+        {
+          "_entityName": "SearchExecution",
+          "_objectID": "x-coredata://NEW-UUID/SearchExecution/p1",
+          "id": "880E8400-E29B-41D4-A716-446655440001",
+          "executionId": "1731613990.123",
+          "searchId": "base_new_exec_1",
+          "query": "index=\"_internal\" source=**.log| stats count...",
+          "startTime": "2025-11-14T20:13:10Z",
+          "endTime": "2025-11-14T20:13:15Z",
+          "status": "completed",
+          "resultCount": 4,
+          "results": [
+            {
+              "_entityName": "SearchResult",
+              "_objectID": "x-coredata://NEW-UUID/SearchResult/p1",
+              "id": "990E8400-E29B-41D4-A716-446655440001",
+              "timestamp": "2025-11-14T20:13:15Z",
+              "rowIndex": 0,
+              "resultJSON": "{\"source\":\"/opt/splunk/var/log/splunk/splunkd.log\",\"host\":\"localhost\",\"count\":1234,\"info\":800,\"error\":100,\"warn\":334}"
+            },
+            {
+              "_entityName": "SearchResult",
+              "_objectID": "x-coredata://NEW-UUID/SearchResult/p2",
+              "id": "990E8400-E29B-41D4-A716-446655440002",
+              "timestamp": "2025-11-14T20:13:15Z",
+              "rowIndex": 1,
+              "resultJSON": "{\"source\":\"/opt/splunk/var/log/splunk/python.log\",\"host\":\"localhost\",\"count\":567,\"info\":400,\"error\":67,\"warn\":100}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "_entityName": "DataSource",
+      "_objectID": "x-coredata://NEW-UUID/DataSource/p2",
+      "id": "770E8400-E29B-41D4-A716-446655440002",
+      "sourceId": "ds_mychart",
+      "name": "Chart Data - Derived from base_new",
+      "type": "ds.chain",
+      "query": "| stats sum(count) by source | sort - sum(count)",
+      "extendsId": "base_new",
+      "optionsJSON": "{}",
+      "executions": []
+    },
+    {
+      "_entityName": "DataSource",
+      "_objectID": "x-coredata://NEW-UUID/DataSource/p3",
+      "id": "770E8400-E29B-41D4-A716-446655440003",
+      "sourceId": "base_time",
+      "name": "Timeline Search",
+      "type": "ds.search",
+      "query": "index=_internal | timechart count span=5",
+      "refresh": "2m",
+      "refreshType": "delay",
+      "optionsJSON": "{\"queryParameters\":{\"earliest\":\"-24h@h\",\"latest\":\"now\"}}",
+      "extendsId": null,
+      "executions": []
+    },
+    {
+      "_entityName": "DataSource",
+      "_objectID": "x-coredata://NEW-UUID/DataSource/p4",
+      "id": "770E8400-E29B-41D4-A716-446655440004",
+      "sourceId": "ds_indexes",
+      "name": "Indexes List",
+      "type": "ds.search",
+      "query": "| tstats count where index=* OR index=_* by index",
+      "optionsJSON": "{\"queryParameters\":{\"earliest\":\"-1h\",\"latest\":\"now\"}}",
+      "extendsId": null,
+      "executions": []
+    }
+  ],
+
+  "visualizations": [
+    {
+      "_entityName": "Visualization",
+      "_objectID": "x-coredata://NEW-UUID/Visualization/p1",
+      "id": "AA0E8400-E29B-41D4-A716-446655440001",
+      "vizId": "mypanel_viz_0",
+      "type": "splunk.table",
+      "title": "table",
+      "optionsJSON": "{\"count\":\"5\",\"dataOverlayMode\":\"none\",\"drilldown\":\"none\",\"percentagesRow\":\"false\",\"rowNumbers\":\"false\",\"totalsRow\":\"false\",\"wrap\":\"true\"}",
+      "contextJSON": "{\"formats\":[{\"field\":\"error\",\"palette\":{\"colors\":[\"#118832\",\"#1182F3\",\"#CBA700\",\"#D94E17\",\"#D41F1F\"],\"type\":\"list\"},\"scale\":{\"type\":\"threshold\",\"values\":[0,30,70,100]},\"type\":\"color\"},{\"field\":\"count\",\"palette\":{\"maxColor\":\"#118832\",\"minColor\":\"#FFFFFF\",\"type\":\"minMidMax\"},\"scale\":{\"type\":\"minMidMax\"},\"type\":\"color\"},{\"field\":\"info\",\"palette\":{\"type\":\"sharedList\"},\"scale\":{\"type\":\"sharedCategory\"},\"type\":\"color\"},{\"field\":\"count\",\"type\":\"number\",\"unit\":\"£\",\"unitPosition\":\"before\"},{\"field\":\"source\",\"palette\":{\"colors\":[\"{'/opt/splunk/var/log/splunk/splunkd.log':#D94E17,''/opt/splunk/var/log/splunk/search_messages.log':#602CA1}\"],\"type\":\"map\"},\"type\":\"color\"}]}",
+      "dataSource": {
+        "_note": "Reference to base_new DataSource",
+        "_entityName": "DataSource",
+        "_objectID": "x-coredata://NEW-UUID/DataSource/p1"
+      }
+    },
+    {
+      "_entityName": "Visualization",
+      "_objectID": "x-coredata://NEW-UUID/Visualization/p2",
+      "id": "AA0E8400-E29B-41D4-A716-446655440002",
+      "vizId": "mychart_viz_0",
+      "type": "splunk.table",
+      "title": "chart",
+      "optionsJSON": "{\"drilldown\":\"none\",\"refresh.display\":\"progressbar\"}",
+      "dataSource": {
+        "_note": "Reference to ds_mychart DataSource (chained)",
+        "_entityName": "DataSource",
+        "_objectID": "x-coredata://NEW-UUID/DataSource/p2"
+      }
+    },
+    {
+      "_entityName": "Visualization",
+      "_objectID": "x-coredata://NEW-UUID/Visualization/p3",
+      "id": "AA0E8400-E29B-41D4-A716-446655440003",
+      "vizId": "mytimeline_viz_0",
+      "type": "splunk.table",
+      "title": "timeline",
+      "optionsJSON": "{\"drilldown\":\"none\",\"refresh.display\":\"progressbar\",\"rowNumbers\":\"true\"}",
+      "dataSource": {
+        "_note": "Reference to base_time DataSource",
+        "_entityName": "DataSource",
+        "_objectID": "x-coredata://NEW-UUID/DataSource/p3"
+      }
+    },
+    {
+      "_entityName": "Visualization",
+      "_objectID": "x-coredata://NEW-UUID/Visualization/p4",
+      "id": "AA0E8400-E29B-41D4-A716-446655440004",
+      "vizId": "indexes_viz_0",
+      "type": "splunk.table",
+      "title": "table",
+      "optionsJSON": "{\"count\":\"5\",\"dataOverlayMode\":\"none\",\"drilldown\":\"none\",\"percentagesRow\":\"false\",\"refresh.display\":\"progressbar\",\"rowNumbers\":\"false\",\"totalsRow\":\"false\",\"wrap\":\"true\"}",
+      "dataSource": {
+        "_note": "Reference to ds_indexes DataSource",
+        "_entityName": "DataSource",
+        "_objectID": "x-coredata://NEW-UUID/DataSource/p4"
+      }
+    }
+  ],
+
+  "inputs": [
+    {
+      "_entityName": "DashboardInput",
+      "_objectID": "x-coredata://NEW-UUID/DashboardInput/p1",
+      "id": "BB0E8400-E29B-41D4-A716-446655440001",
+      "inputId": "input_filename",
+      "type": "input.dropdown",
+      "title": "File Chooser",
+      "token": "filename",
+      "defaultValue": "*.log",
+      "optionsJSON": "{\"choices\":[{\"label\":\"splunk ui\",\"value\":\"splunk_ui_access.log\"},{\"label\":\"splunk d\",\"value\":\"splunkd.log\"},{\"label\":\"python\",\"value\":\"python.log\"},{\"label\":\"all\",\"value\":\"*.log\"}],\"searchWhenChanged\":true}"
+    }
+  ],
+
+  "layout": {
+    "_entityName": "DashboardLayout",
+    "_objectID": "x-coredata://NEW-UUID/DashboardLayout/p1",
+    "id": "CC0E8400-E29B-41D4-A716-446655440001",
+    "type": "bootstrap",
+    "optionsJSON": "{\"theme\":\"dark\"}",
+    "globalInputs": "[\"input_filename\"]",
+
+    "layoutItems": [
+      {
+        "_entityName": "LayoutItem",
+        "_objectID": "x-coredata://NEW-UUID/LayoutItem/p1",
+        "id": "DD0E8400-E29B-41D4-A716-446655440001",
+        "type": "input",
+        "bootstrapWidth": "12",
+        "position": 0,
+        "input": {
+          "_note": "Reference to filename input",
+          "_entityName": "DashboardInput",
+          "_objectID": "x-coredata://NEW-UUID/DashboardInput/p1"
+        }
+      },
+      {
+        "_entityName": "LayoutItem",
+        "_objectID": "x-coredata://NEW-UUID/LayoutItem/p2",
+        "id": "DD0E8400-E29B-41D4-A716-446655440002",
+        "type": "block",
+        "bootstrapWidth": "6",
+        "position": 1,
+        "visualization": {
+          "_note": "Reference to mychart visualization in row 0",
+          "_entityName": "Visualization",
+          "_objectID": "x-coredata://NEW-UUID/Visualization/p2"
+        }
+      },
+      {
+        "_entityName": "LayoutItem",
+        "_objectID": "x-coredata://NEW-UUID/LayoutItem/p3",
+        "id": "DD0E8400-E29B-41D4-A716-446655440003",
+        "type": "block",
+        "bootstrapWidth": "6",
+        "position": 2,
+        "visualization": {
+          "_note": "Reference to mytimeline visualization in row 0",
+          "_entityName": "Visualization",
+          "_objectID": "x-coredata://NEW-UUID/Visualization/p3"
+        }
+      },
+      {
+        "_entityName": "LayoutItem",
+        "_objectID": "x-coredata://NEW-UUID/LayoutItem/p4",
+        "id": "DD0E8400-E29B-41D4-A716-446655440004",
+        "type": "block",
+        "bootstrapWidth": "12",
+        "position": 3,
+        "visualization": {
+          "_note": "Reference to mypanel visualization in row 1",
+          "_entityName": "Visualization",
+          "_objectID": "x-coredata://NEW-UUID/Visualization/p1"
+        }
+      },
+      {
+        "_entityName": "LayoutItem",
+        "_objectID": "x-coredata://NEW-UUID/LayoutItem/p5",
+        "id": "DD0E8400-E29B-41D4-A716-446655440005",
+        "type": "block",
+        "bootstrapWidth": "12",
+        "position": 4,
+        "visualization": {
+          "_note": "Reference to indexes visualization in row 2",
+          "_entityName": "Visualization",
+          "_objectID": "x-coredata://NEW-UUID/Visualization/p4"
+        }
+      }
+    ]
+  }
+}
