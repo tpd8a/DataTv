@@ -7,51 +7,56 @@
 
 import CoreData
 
+/// Persistence controller for SplTV
+/// Uses DashboardKit's CoreData manager directly
 struct PersistenceController {
+    // Deprecated - use DashboardKit.manager instead
     static let shared = PersistenceController()
 
     @MainActor
     static let preview: PersistenceController = {
         let result = PersistenceController(inMemory: true)
-        let viewContext = result.container.viewContext
-        for _ in 0..<10 {
-            let newItem = Item(context: viewContext)
-            newItem.timestamp = Date()
-        }
-        do {
-            try viewContext.save()
-        } catch {
-            // Replace this implementation with code to handle the error appropriately.
-            // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-            let nsError = error as NSError
-            fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
-        }
         return result
     }()
 
     let container: NSPersistentContainer
 
     init(inMemory: Bool = false) {
-        container = NSPersistentContainer(name: "SplTv")
+        // Load DashboardKit's CoreData model from the package
+        let modelName = "DashboardModel"
+
+        // Try to find the model in DashboardKit bundle
+        var modelURL: URL?
+
+        // Check in main bundle first (when DashboardKit is linked)
+        if let url = Bundle.main.url(forResource: modelName, withExtension: "momd") {
+            modelURL = url
+        }
+
+        guard let url = modelURL,
+              let model = NSManagedObjectModel(contentsOf: url) else {
+            fatalError("Failed to load DashboardKit CoreData model '\(modelName)'")
+        }
+
+        container = NSPersistentContainer(name: "SplTv", managedObjectModel: model)
+
         if inMemory {
             container.persistentStoreDescriptions.first!.url = URL(fileURLWithPath: "/dev/null")
         }
+
         container.loadPersistentStores(completionHandler: { (storeDescription, error) in
             if let error = error as NSError? {
-                // Replace this implementation with code to handle the error appropriately.
-                // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-
-                /*
-                 Typical reasons for an error here include:
-                 * The parent directory does not exist, cannot be created, or disallows writing.
-                 * The persistent store is not accessible, due to permissions or data protection when the device is locked.
-                 * The device is out of space.
-                 * The store could not be migrated to the current model version.
-                 Check the error message to determine what the actual problem was.
-                 */
+                // In production, handle this error gracefully
                 fatalError("Unresolved error \(error), \(error.userInfo)")
             }
         })
+
         container.viewContext.automaticallyMergesChangesFromParent = true
+        container.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+    }
+
+    /// Get the managed object context
+    var context: NSManagedObjectContext {
+        return container.viewContext
     }
 }

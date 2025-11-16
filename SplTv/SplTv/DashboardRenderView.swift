@@ -1,6 +1,6 @@
 import SwiftUI
 import CoreData
-import d8aTvCore
+import DashboardKit
 
 #if os(macOS) || os(tvOS)
 

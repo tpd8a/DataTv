@@ -7,7 +7,7 @@
 
 import SwiftUI
 import CoreData
-import d8aTvCore
+import DashboardKit
 import UniformTypeIdentifiers
 
 #if os(macOS) || os(tvOS)
@@ -20,7 +20,7 @@ struct SplTvApp: App {
     
     // MARK: - Core Data Context
     
-    public let persistenceController = CoreDataManager.shared
+    public let persistenceController = PersistenceController.shared
     
     
     // MARK: - Scene
