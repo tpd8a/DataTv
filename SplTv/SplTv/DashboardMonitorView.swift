@@ -1,8 +1,8 @@
 import SwiftUI
 import CoreData
-import d8aTvCore
+import DashboardKit
 import Combine
-import d8aTvCore
+import DashboardKit
 // MARK: - Cell Change Settings
 
 /// Settings for how cell changes are displayed in the results table

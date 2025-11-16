@@ -1,7 +1,7 @@
 import SwiftUI
 import CoreData
 import Combine
-import d8aTvCore
+import DashboardKit
 
 /// Manages token state for dashboards
 /// Tracks current values, provides change notifications, and integrates with CoreDataManager

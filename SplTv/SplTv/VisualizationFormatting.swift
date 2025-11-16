@@ -1,6 +1,6 @@
 import Foundation
 import SwiftUI
-import d8aTvCore
+import DashboardKit
 
 // MARK: - Visualization Formatting System
 
