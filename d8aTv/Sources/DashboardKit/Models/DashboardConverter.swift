@@ -16,18 +16,40 @@ public struct DashboardConverter {
         var dsCounter = 0
         var yPosition = 0
 
+        // Track named searches for referencing
+        var namedSearches: [String: String] = [:]  // searchId -> dataSourceId
+
         // Convert inputs first
         if let fieldsets = simpleXML.fieldsets {
             for fieldset in fieldsets {
                 for input in fieldset.inputs {
                     let inputId = "input_\(input.token)"
 
+                    // Convert choices to Studio input options
+                    var inputOptions: [String: AnyCodable]? = nil
+                    if !input.choices.isEmpty {
+                        var items: [[String: String]] = []
+                        for choice in input.choices {
+                            items.append([
+                                "label": choice.label,
+                                "value": choice.value
+                            ])
+                        }
+                        inputOptions = [
+                            "items": AnyCodable(items),
+                            "token": AnyCodable(input.token)
+                        ]
+                        if let defaultValue = input.defaultValue {
+                            inputOptions?["defaultValue"] = AnyCodable(defaultValue)
+                        }
+                    }
+
                     let studioInput = InputDefinition(
                         type: convertInputType(input.type),
                         title: input.label,
                         token: input.token,
                         defaultValue: input.defaultValue,
-                        options: nil
+                        options: inputOptions
                     )
 
                     inputs[inputId] = studioInput
@@ -61,39 +83,94 @@ public struct DashboardConverter {
                 // Create data source if search exists
                 var primaryDataSource: String?
                 if let search = panel.search {
-                    let dsId = "ds_\(dsCounter)"
-                    dsCounter += 1
+                    // Determine data source ID
+                    let dsId: String
+                    if let searchId = search.id {
+                        // Use search ID as data source ID (prefixed with ds_)
+                        dsId = "ds_\(searchId)"
+                    } else {
+                        // Generate ID
+                        dsId = "ds_\(dsCounter)"
+                        dsCounter += 1
+                    }
+
+                    // Check search type: saved search (ref), chained (base), or regular search
+                    let isSavedSearch = search.ref != nil
+                    let isChained = search.base != nil
 
                     let queryParams = QueryParameters(
                         earliest: search.earliest,
                         latest: search.latest
                     )
 
-                    let options = DataSourceOptions(
-                        query: search.query,
-                        queryParameters: queryParams,
-                        refresh: search.refresh,
-                        refreshType: search.refreshType
-                    )
+                    let options: DataSourceOptions
+                    let dsType: String
+                    let name: String?
+
+                    if isSavedSearch, let ref = search.ref {
+                        // Create saved search reference
+                        dsType = "ds.savedSearch"
+                        name = search.id ?? ref // Use search ID or ref as name
+                        options = DataSourceOptions(
+                            query: nil,  // Saved searches don't have inline queries
+                            queryParameters: queryParams.earliest != nil || queryParams.latest != nil ? queryParams : nil,
+                            refresh: search.refresh,
+                            refreshType: search.refreshType,
+                            ref: ref  // Reference to saved search
+                        )
+                    } else if isChained, let base = search.base {
+                        // Create chained data source (post-processing)
+                        dsType = "ds.chain"
+                        name = search.id // Use the search ID as the name
+                        options = DataSourceOptions(
+                            query: search.query,
+                            queryParameters: queryParams.earliest != nil || queryParams.latest != nil ? queryParams : nil,
+                            refresh: search.refresh,
+                            refreshType: search.refreshType,
+                            extend: "ds_\(base)"  // Reference the base search
+                        )
+                    } else {
+                        // Create standalone search data source
+                        dsType = "ds.search"
+                        name = search.id // Use the search ID as the name
+                        options = DataSourceOptions(
+                            query: search.query,
+                            queryParameters: queryParams,
+                            refresh: search.refresh,
+                            refreshType: search.refreshType
+                        )
+                    }
 
                     let dataSource = DataSourceDefinition(
-                        type: "ds.search",
+                        type: dsType,
+                        name: name,
                         options: options
                     )
 
                     dataSources[dsId] = dataSource
                     primaryDataSource = dsId
+
+                    // Track named searches for later reference
+                    if let searchId = search.id {
+                        namedSearches[searchId] = dsId
+                    }
                 }
 
                 // Create visualization
                 let vizType = convertVisualizationType(panel.visualization.type)
-                let vizOptions = convertVisualizationOptions(panel.visualization.options)
+
+                // Convert options and formats to Studio format with proper structure
+                let (vizOptions, vizContext) = convertVisualizationOptionsAndFormats(
+                    options: panel.visualization.options,
+                    formatElements: panel.visualization.formatElements
+                )
 
                 let visualization = VisualizationDefinition(
                     type: vizType,
                     title: panel.title,
                     dataSources: primaryDataSource != nil ? DataSourceReferences(primary: primaryDataSource) : nil,
-                    options: vizOptions
+                    options: vizOptions,
+                    context: vizContext
                 )
 
                 visualizations[vizId] = visualization
@@ -141,11 +218,14 @@ public struct DashboardConverter {
         // Group visualizations by Y position (approximate rows)
         var vizByY: [Int: [(item: String, x: Int)]] = [:]
 
-        for layoutItem in studio.layout.structure {
-            if layoutItem.type == .block {
-                let y = layoutItem.position.y ?? 0
-                let x = layoutItem.position.x ?? 0
-                vizByY[y, default: []].append((item: layoutItem.item, x: x))
+        // Handle structure array (for converted SimpleXML)
+        if let structure = studio.layout.structure {
+            for layoutItem in structure {
+                if layoutItem.type == .block {
+                    let y = layoutItem.position.y ?? 0
+                    let x = layoutItem.position.x ?? 0
+                    vizByY[y, default: []].append((item: layoutItem.item, x: x))
+                }
             }
         }
 
@@ -287,25 +367,331 @@ public struct DashboardConverter {
         }
     }
 
-    private func convertVisualizationOptions(_ options: [String: String]) -> [String: AnyCodable]? {
-        guard !options.isEmpty else { return nil }
+    /// Convert visualization options and format elements to Studio format
+    /// Returns (options, context) with proper nested structures
+    private func convertVisualizationOptionsAndFormats(
+        options: [String: String],
+        formatElements: [String: String]
+    ) -> (options: [String: AnyCodable]?, context: [String: AnyCodable]?) {
 
-        var converted: [String: AnyCodable] = [:]
+        // Convert simple options - parse strings back to proper types
+        var studioOptions: [String: AnyCodable] = [:]
         for (key, value) in options {
-            // Try to parse as number or boolean
+            // Parse value to correct type
             if let intValue = Int(value) {
-                converted[key] = AnyCodable(intValue)
+                studioOptions[key] = AnyCodable(intValue)
             } else if let doubleValue = Double(value) {
-                converted[key] = AnyCodable(doubleValue)
+                studioOptions[key] = AnyCodable(doubleValue)
             } else if value.lowercased() == "true" {
-                converted[key] = AnyCodable(true)
+                studioOptions[key] = AnyCodable(true)
             } else if value.lowercased() == "false" {
-                converted[key] = AnyCodable(false)
+                studioOptions[key] = AnyCodable(false)
             } else {
-                converted[key] = AnyCodable(value)
+                studioOptions[key] = AnyCodable(value)
             }
         }
 
-        return converted
+        // Build context from format elements
+        var context: [String: Any] = [:]
+        var columnFormat: [String: Any] = [:]
+
+        // Group format elements by field
+        var fieldFormats: [String: [String: String]] = [:]
+        for (key, value) in formatElements {
+            let parts = key.split(separator: ".").map(String.init)
+            guard parts.count >= 3, parts[0] == "format" else { continue }
+
+            let field = parts[1]
+            let property = parts[2...].joined(separator: ".")
+
+            if fieldFormats[field] == nil {
+                fieldFormats[field] = [:]
+            }
+            fieldFormats[field]?[property] = value
+        }
+
+        // Convert each field's format to context and columnFormat
+        for (field, formats) in fieldFormats {
+            if let type = formats["type"] {
+                switch type {
+                case "color":
+                    let (contextConfig, formatConfig) = convertColorFormat(field: field, formats: formats)
+                    if let config = contextConfig {
+                        context["\(field)ColumnColorConfig"] = config
+                    }
+                    if let format = formatConfig {
+                        if columnFormat[field] == nil {
+                            columnFormat[field] = [:]
+                        }
+                        if var fieldFormat = columnFormat[field] as? [String: Any] {
+                            fieldFormat["rowBackgroundColors"] = format
+                            columnFormat[field] = fieldFormat
+                        }
+                    }
+
+                case "number":
+                    let (contextConfig, formatConfig) = convertNumberFormat(field: field, formats: formats)
+                    if let config = contextConfig {
+                        context["\(field)ColumnNumberConfig"] = config
+                    }
+                    if let format = formatConfig {
+                        if columnFormat[field] == nil {
+                            columnFormat[field] = [:]
+                        }
+                        if var fieldFormat = columnFormat[field] as? [String: Any] {
+                            fieldFormat["data"] = format
+                            columnFormat[field] = fieldFormat
+                        }
+                    }
+
+                default:
+                    break
+                }
+            }
+        }
+
+        // Add columnFormat to options if we have any
+        if !columnFormat.isEmpty {
+            studioOptions["columnFormat"] = AnyCodable(columnFormat)
+        }
+
+        // Convert context to AnyCodable
+        var studioContext: [String: AnyCodable]? = nil
+        if !context.isEmpty {
+            studioContext = [:]
+            for (key, value) in context {
+                studioContext?[key] = AnyCodable(value)
+            }
+        }
+
+        return (
+            studioOptions.isEmpty ? nil : studioOptions,
+            studioContext
+        )
+    }
+
+    /// Convert color format to Studio format
+    private func convertColorFormat(field: String, formats: [String: String]) -> (context: Any?, format: String?) {
+        guard let paletteType = formats["palette.type"] else {
+            return (nil, nil)
+        }
+
+        switch paletteType {
+        case "list":
+            // Threshold-based color mapping
+            if let colorsStr = formats["palette.colors"],
+               let thresholdsStr = formats["scale.thresholds"] {
+                let colors = parseColorList(colorsStr)
+                let thresholds = parseThresholdList(thresholdsStr)
+                let config = createThresholdColorConfig(colors: colors, thresholds: thresholds)
+                let format = "> table | seriesByName(\"\(field)\") | rangeValue(\(field)ColumnColorConfig)"
+                return (config, format)
+            }
+
+        case "minMidMax":
+            // Gradient color mapping
+            if let minColor = formats["palette.minColor"],
+               let maxColor = formats["palette.maxColor"] {
+                let config = ["colors": [minColor, maxColor]]
+                let format = "> table | seriesByName(\"\(field)\") | gradient(\(field)ColumnColorConfig)"
+                return (config, format)
+            }
+
+        case "sharedList":
+            // Simple color list
+            if let colorStr = formats["palette.colors"] {
+                let colors = parseColorList(colorStr)
+                let format = "> table | seriesByName(\"\(field)\") | pick(\(field)ColumnColorConfig)"
+                return (colors, format)
+            }
+
+        case "map":
+            // Value-based color mapping
+            if let colorsStr = formats["palette.colors"] {
+                let config = parseColorMap(colorsStr)
+                let format = "> table | seriesByName(\"\(field)\") | matchValue(\(field)ColumnColorConfig)"
+                return (config, format)
+            }
+
+        default:
+            break
+        }
+
+        return (nil, nil)
+    }
+
+    /// Convert number format to Studio format
+    private func convertNumberFormat(field: String, formats: [String: String]) -> (context: Any?, format: String?) {
+        var numberConfig: [String: Any] = [
+            "precision": 2,
+            "thousandSeparated": true
+        ]
+
+        if let unit = formats["unit"] {
+            numberConfig["unit"] = unit
+        }
+        if let unitPosition = formats["unitPosition"] {
+            numberConfig["unitPosition"] = unitPosition
+        }
+
+        let config = ["number": numberConfig]
+        let format = "> table | seriesByName(\"\(field)\") | formatByType(\(field)ColumnNumberConfig)"
+
+        return (config, format)
+    }
+
+    /// Convert flattened format elements to Studio visualization context
+    /// Converts format.field.property to nested context structure
+    private func convertFormatElementsToContext(_ formatElements: [String: String]) -> [String: AnyCodable]? {
+        guard !formatElements.isEmpty else { return nil }
+
+        var context: [String: Any] = [:]
+
+        // Group format elements by field
+        var fieldFormats: [String: [String: String]] = [:]
+        for (key, value) in formatElements {
+            let parts = key.split(separator: ".").map(String.init)
+            guard parts.count >= 3, parts[0] == "format" else { continue }
+
+            let field = parts[1]
+            let property = parts[2...].joined(separator: ".")
+
+            if fieldFormats[field] == nil {
+                fieldFormats[field] = [:]
+            }
+            fieldFormats[field]?[property] = value
+        }
+
+        // Convert each field's format to context structure
+        for (field, formats) in fieldFormats {
+            let contextKey = "\(field)ColumnColorConfig"
+
+            if let paletteType = formats["palette.type"] {
+                switch paletteType {
+                case "list":
+                    // Threshold-based color mapping
+                    if let colorsStr = formats["palette.colors"],
+                       let thresholdsStr = formats["scale.thresholds"] {
+                        let colors = parseColorList(colorsStr)
+                        let thresholds = parseThresholdList(thresholdsStr)
+                        context[contextKey] = createThresholdColorConfig(colors: colors, thresholds: thresholds)
+                    }
+                case "minMidMax":
+                    // Gradient color mapping
+                    var gradientConfig: [String: Any] = [:]
+                    if let minColor = formats["palette.minColor"] {
+                        gradientConfig["minColor"] = minColor
+                    }
+                    if let maxColor = formats["palette.maxColor"] {
+                        gradientConfig["maxColor"] = maxColor
+                    }
+                    if !gradientConfig.isEmpty {
+                        context[contextKey] = ["colors": [gradientConfig["minColor"] ?? "#FFFFFF", gradientConfig["maxColor"] ?? "#000000"]]
+                    }
+                default:
+                    break
+                }
+            }
+
+            // Handle number formatting
+            if let unit = formats["unit"] {
+                let numberConfigKey = "\(field)ColumnNumberConfig"
+                var numberConfig: [String: Any] = [
+                    "number": [
+                        "precision": 2,
+                        "thousandSeparated": true,
+                        "unit": unit,
+                        "unitPosition": formats["unitPosition"] ?? "after"
+                    ]
+                ]
+                context[numberConfigKey] = numberConfig
+            }
+        }
+
+        guard !context.isEmpty else { return nil }
+
+        // Convert to AnyCodable
+        var result: [String: AnyCodable] = [:]
+        for (key, value) in context {
+            result[key] = AnyCodable(value)
+        }
+        return result
+    }
+
+    private func parseColorList(_ colorStr: String) -> [String] {
+        // Parse "[#118832,#1182F3,#CBA700]" to array
+        let trimmed = colorStr.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        return trimmed.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+    }
+
+    private func parseThresholdList(_ thresholdStr: String) -> [Double] {
+        return thresholdStr.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+    }
+
+    private func parseColorMap(_ mapStr: String) -> [[String: String]] {
+        // Parse color map - handles both JSON array format and simple map format
+        // JSON format: ["{\"/path1\":#color1}","{\"/path2\":#color2}"]
+        // Simple format: {"/path1":#color1,"/path2":#color2}
+        var result: [[String: String]] = []
+
+        // Check if input is JSON array (from serialized format)
+        if mapStr.hasPrefix("[") {
+            // Decode JSON array
+            if let data = mapStr.data(using: .utf8),
+               let entries = try? JSONDecoder().decode([String].self, from: data) {
+                // Each entry is like {"/path":#color}
+                for entry in entries {
+                    let trimmed = entry.trimmingCharacters(in: CharacterSet(charactersIn: "{}"))
+                    // Split on : to get path and color
+                    if let colonIndex = trimmed.lastIndex(of: ":") {
+                        let match = String(trimmed[..<colonIndex]).trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                        let value = String(trimmed[trimmed.index(after: colonIndex)...]).trimmingCharacters(in: .whitespaces)
+                        result.append(["match": match, "value": value])
+                    }
+                }
+            }
+        } else {
+            // Simple format parsing
+            let trimmed = mapStr.trimmingCharacters(in: CharacterSet(charactersIn: "{}"))
+            let pairs = trimmed.components(separatedBy: ",")
+
+            for pair in pairs {
+                if let colonIndex = pair.lastIndex(of: ":") {
+                    let match = String(pair[..<colonIndex]).trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                    let value = String(pair[pair.index(after: colonIndex)...]).trimmingCharacters(in: .whitespaces)
+                    result.append(["match": match, "value": value])
+                }
+            }
+        }
+
+        return result
+    }
+
+    private func createThresholdColorConfig(colors: [String], thresholds: [Double]) -> [[String: Any]] {
+        var config: [[String: Any]] = []
+
+        for (index, threshold) in thresholds.enumerated() {
+            var entry: [String: Any] = [:]
+            if index == 0 {
+                entry["to"] = threshold
+            } else {
+                entry["from"] = thresholds[index - 1]
+                entry["to"] = threshold
+            }
+            if index < colors.count {
+                entry["value"] = colors[index]
+            }
+            config.append(entry)
+        }
+
+        // Add final range
+        if !thresholds.isEmpty && thresholds.count < colors.count {
+            config.append([
+                "from": thresholds.last!,
+                "value": colors[thresholds.count]
+            ])
+        }
+
+        return config
     }
 }

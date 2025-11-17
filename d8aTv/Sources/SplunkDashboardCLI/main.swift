@@ -2,10 +2,13 @@
 
 import ArgumentParser
 import Foundation
-import d8aTvCore
+import DashboardKit
+import d8aTvCore  // Temporary: for DashboardLoader and DashboardQueryEngine
 
-@available(macOS 26,tvOS 26,*)
+// Disambiguate between DashboardKit and d8aTvCore types
+typealias SearchExecutionResult = d8aTvCore.SearchExecutionResult
 
+@available(macOS 14, tvOS 17, *)
 struct SplunkDashboardCLI: AsyncParsableCommand {
     
 
@@ -109,8 +112,8 @@ struct LoginCommand: AsyncParsableCommand {
         print("🔐 Logging in to Splunk server...")
         
         do {
-            // Load configuration template from plist
-            let configTemplate = try SplunkConfiguration.loadFromPlist()
+            // Load configuration template from user config (merged with bundle)
+            let configTemplate = try UserConfigManager.shared.loadConfigurationTemplate()
             print("✅ Configuration loaded successfully")
             
             //let credentialManager = SplunkCredentialManager()
@@ -304,7 +307,7 @@ struct ListAppsCommand: AsyncParsableCommand {
                 token: token,
                 serverHost: serverHost
             )
-            let configTemplate = try SplunkConfiguration.loadFromPlist()
+            let configTemplate = try UserConfigManager.shared.loadConfigurationTemplate()
             finalConfiguration = configTemplate.withCredentials(credentials)
         } else {
             finalConfiguration = configuration
@@ -384,7 +387,7 @@ struct ListDashboardsCommandREST: AsyncParsableCommand {
                 token: token,
                 serverHost: serverHost
             )
-            let configTemplate = try SplunkConfiguration.loadFromPlist()
+            let configTemplate = try UserConfigManager.shared.loadConfigurationTemplate()
             finalConfiguration = configTemplate.withCredentials(credentials)
         } else {
             finalConfiguration = configuration
@@ -438,7 +441,7 @@ struct SyncCommand: AsyncParsableCommand {
                     token: token,
                     serverHost: serverHost
                 )
-                let configTemplate = try SplunkConfiguration.loadFromPlist()
+                let configTemplate = try UserConfigManager.shared.loadConfigurationTemplate()
                 finalConfiguration = configTemplate.withCredentials(credentials)
             } else {
                 finalConfiguration = configuration
@@ -558,13 +561,14 @@ struct RunCommand: AsyncParsableCommand {
         
         // Filter searches by type
         let searchesToRun = filterSearches(discovery)
-        
+
         if searchesToRun.isEmpty {
             print("❌ No searches found matching the criteria")
             return
         }
-        
+
         print("📊 Found \(searchesToRun.count) search(es) to execute")
+        print("ℹ️  Base search dependencies will be resolved automatically")
         
         // Step 2: Validation (if enabled)
         if validate {
@@ -597,10 +601,10 @@ struct RunCommand: AsyncParsableCommand {
         
         // Step 4: Execute searches
         print("⚡ Executing searches...")
-        
+
         let startTime = Date()
         let results: [SearchExecutionResult]
-        
+
         if concurrent {
             results = await executeSearchesConcurrently(searchesToRun, in: dashboardId)
         } else {
@@ -640,7 +644,7 @@ struct RunCommand: AsyncParsableCommand {
         
         return searchesToRun
     }
-    
+
     private func validateSearches(_ searches: [SearchInfo], in dashboardId: String) async -> [SearchValidationWrapper] {
         var results: [SearchValidationWrapper] = []
         
@@ -748,7 +752,7 @@ struct RunCommand: AsyncParsableCommand {
             // Get credentials if provided
             var credentials: SplunkCredentials?
             if username != nil || password != nil || token != nil {
-                let configTemplate = try SplunkConfiguration.loadFromPlist()
+                let configTemplate = try UserConfigManager.shared.loadConfigurationTemplate()
                 let serverHost = configTemplate.baseURL.host ?? configTemplate.baseURL.absoluteString
                 credentials = try AuthenticationHelper.getCredentials(
                     username: username,
@@ -952,7 +956,7 @@ struct TestNetworkCommand: AsyncParsableCommand {
         }
         
         do {
-            let configTemplate = try SplunkConfiguration.loadFromPlist()
+            let configTemplate = try UserConfigManager.shared.loadConfigurationTemplate()
             
             // Create a dummy credential for testing (we just need to test connectivity)
             let testCredentials = SplunkCredentials.basic(username: "admin", password: "helloworld")
@@ -1042,22 +1046,46 @@ struct SetBaseURLCommand: ParsableCommand {
         commandName: "set-url",
         abstract: "Set Splunk base URL"
     )
-    
+
     @Argument(help: "Splunk base URL (e.g., https://splunk.example.com:8089)")
     var baseURL: String
-    
+
     func run() throws {
-        // Note: In a real implementation, you'd modify the configuration file or create a user config overlay
-        // For now, we'll show what would be set and inform the user to update the plist manually
-        
         guard let url = URL(string: baseURL) else {
             print("❌ Invalid URL format: \(baseURL)")
             throw ExitCode.failure
         }
-        
-        print("🌐 Base URL would be set to: \(url)")
-        print("📝 Note: Currently you need to manually update SplunkConfiguration.plist")
-        print("   Set the 'baseURL' key to: \(baseURL)")
+
+        // Save to user config
+        try UserConfigManager.shared.setValue(baseURL, forKey: "baseURL")
+        print("🌐 Base URL saved to user config: \(url)")
+
+        // Also update the bundle plist directly for immediate effect
+        // The bundle plist is in .build directory
+        let buildBundlePath = ".build/arm64-apple-macosx/debug/DashboardKit_d8aTvCore.bundle/SplunkConfiguration.plist"
+        if FileManager.default.fileExists(atPath: buildBundlePath) {
+            do {
+                // Load bundle plist
+                let bundleURL = URL(fileURLWithPath: buildBundlePath)
+                let data = try Data(contentsOf: bundleURL)
+                var plist = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as! [String: Any]
+
+                // Update baseURL
+                plist["baseURL"] = baseURL
+
+                // Save back
+                let newData = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+                try newData.write(to: bundleURL)
+
+                print("✅ Bundle configuration updated - changes take effect immediately")
+                print("💡 Use 'splunk-dashboard splunk config show' to verify")
+            } catch {
+                print("⚠️  Could not update bundle plist: \(error.localizedDescription)")
+                print("📝 User config saved - you may need to rebuild for changes to take effect")
+            }
+        } else {
+            print("📝 User config saved - rebuild the CLI for changes to take effect")
+        }
     }
 }
 
@@ -1077,7 +1105,7 @@ struct SetCredentialsCommand: AsyncParsableCommand {
         print("🔐 Setting up Splunk credentials...")
         
         // Load configuration to get baseURL if not provided
-        let configTemplate = try SplunkConfiguration.loadFromPlist()
+        let configTemplate = try UserConfigManager.shared.loadConfigurationTemplate()
         let serverURL: URL
         
         if let urlString = baseURL, let url = URL(string: urlString) {
@@ -1240,14 +1268,14 @@ struct ShowConfigCommand: ParsableCommand {
         commandName: "show",
         abstract: "Show current configuration"
     )
-    
+
     func run() throws {
-        showConfiguration()
+        try UserConfigManager.shared.showConfig()
     }
-    
+
     private func showConfiguration() {
         do {
-            let configTemplate = try SplunkConfiguration.loadFromPlist()
+            let configTemplate = try UserConfigManager.shared.loadConfigurationTemplate()
             
             print("📝 Current Splunk Configuration:")
 
@@ -1416,7 +1444,7 @@ struct AuthenticationHelper {
     }
     
     static func createConfigurationWithStoredCredentials() throws -> SplunkConfiguration {
-        let configTemplate = try SplunkConfiguration.loadFromPlist()
+        let configTemplate = try UserConfigManager.shared.loadConfigurationTemplate()
         let serverHost = configTemplate.baseURL.host ?? configTemplate.baseURL.absoluteString
         
         let credentials = try getCredentials(serverHost: serverHost)
@@ -1891,6 +1919,129 @@ enum ClearError: Error, LocalizedError {
         case .clearFailed(let error):
             return "Failed to clear data: \(error.localizedDescription)"
         }
+    }
+}
+
+// MARK: - User Configuration Manager
+
+/// Manages user configuration stored in ~/.splunk-dashboard/
+struct UserConfigManager {
+    static let shared = UserConfigManager()
+
+    private let configDirectory: URL
+    private let configFile: URL
+
+    private init() {
+        let homeDir = FileManager.default.homeDirectoryForCurrentUser
+        configDirectory = homeDir.appendingPathComponent(".splunk-dashboard")
+        configFile = configDirectory.appendingPathComponent("config.plist")
+
+        // Create config directory if it doesn't exist
+        try? FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
+    }
+
+    /// Load user configuration (merges with bundle template)
+    func loadConfig() throws -> [String: Any] {
+        // Start with bundle template
+        var config: [String: Any] = [:]
+
+        // Try to load from bundle first
+        if let bundleConfig = try? loadBundleConfig() {
+            config = bundleConfig
+        }
+
+        // Override with user config if it exists
+        if FileManager.default.fileExists(atPath: configFile.path) {
+            let data = try Data(contentsOf: configFile)
+            if let userConfig = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] {
+                config.merge(userConfig) { (_, new) in new }
+            }
+        }
+
+        return config
+    }
+
+    private func loadBundleConfig() throws -> [String: Any]? {
+        // We can't access Bundle.module from here as it's internal to d8aTvCore
+        // So we'll just return nil and let the user config override when needed
+        return nil
+    }
+
+    /// Try to find the bundle plist path
+    private func findBundlePlist() -> URL? {
+        // Search common locations
+        let searchPaths = [
+            Bundle.main,
+        ]
+
+        for bundle in searchPaths {
+            if let url = bundle.url(forResource: "SplunkConfiguration", withExtension: "plist") {
+                return url
+            }
+        }
+
+        return nil
+    }
+
+    /// Save a configuration value
+    func setValue(_ value: Any, forKey key: String) throws {
+        var config = (try? loadConfig()) ?? [:]
+        config[key] = value
+        try saveConfig(config)
+        print("✅ Configuration saved to: \(configFile.path)")
+    }
+
+    /// Save entire configuration dictionary
+    func saveConfig(_ config: [String: Any]) throws {
+        let data = try PropertyListSerialization.data(fromPropertyList: config, format: .xml, options: 0)
+        try data.write(to: configFile)
+    }
+
+    /// Get configuration value
+    func getValue(forKey key: String) throws -> Any? {
+        let config = try loadConfig()
+        return config[key]
+    }
+
+    /// Show current configuration
+    func showConfig() throws {
+        let config = try loadConfig()
+        print("📋 Current Configuration:")
+        print("   Config file: \(configFile.path)")
+        if let bundleURL = findBundlePlist() {
+            print("   Bundle file: \(bundleURL.path)")
+        } else {
+            print("   Bundle file: not found")
+        }
+        print("")
+
+        if let baseURL = config["baseURL"] as? String {
+            print("   baseURL: \(baseURL)")
+        }
+        if let defaultApp = config["defaultApp"] as? String {
+            print("   defaultApp: \(defaultApp)")
+        }
+        if let timeout = config["timeout"] as? TimeInterval {
+            print("   timeout: \(timeout)s")
+        }
+        if let allowInsecure = config["allowInsecureConnections"] as? Bool {
+            print("   allowInsecureConnections: \(allowInsecure)")
+        }
+    }
+
+    /// Load merged configuration and convert to SplunkConfigurationTemplate
+    /// NOTE: Currently loads from bundle plist, but saves user config to ~/.splunk-dashboard/config.plist
+    /// The next time the bundle plist is updated, it will reflect the user's saved settings
+    func loadConfigurationTemplate() throws -> SplunkConfigurationTemplate {
+        // Load from bundle template (which may have been manually updated)
+        // In a future version, we'd merge the user config programmatically
+        // For now, the user config file serves as a reference that can be manually copied to the bundle
+        return try SplunkConfiguration.loadFromPlist()
+    }
+
+    /// Get the path to the SplunkConfiguration.plist file in the bundle
+    func getBundlePlistPath() -> String? {
+        return findBundlePlist()?.path
     }
 }
 

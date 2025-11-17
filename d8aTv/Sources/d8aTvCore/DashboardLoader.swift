@@ -1,6 +1,7 @@
 import Foundation
 import CoreData
 import CryptoKit
+import DashboardKit
 
 /// Splunk SimpleXML dashboard loader for Core Data
 @MainActor
@@ -24,71 +25,10 @@ public class DashboardLoader {
     }
     
     /// Load a SimpleXML dashboard from XML content string
+    /// Now uses the new Dashboard Studio format (data source-centric)
     public func loadDashboard(xmlContent: String, dashboardId: String, appName: String? = nil) throws {
-        print("🔄 Loading dashboard '\(dashboardId)' from app '\(appName ?? "unknown")'...")
-        
-        // Parse XML
-        let parser = SimpleXMLParser()
-        let root = try parser.parse(xmlString: xmlContent)
-        
-        // Validate it's a dashboard
-        guard root.name == "dashboard" || root.name == "form" else {
-            throw DashboardLoadingError.notADashboard(rootElement: root.name)
-        }
-        
-        // Generate hash for change detection
-        let xmlHash = SHA256.hash(data: xmlContent.data(using: .utf8) ?? Data())
-        let hashString = xmlHash.compactMap { String(format: "%02x", $0) }.joined()
-        
-        // Create unique composite ID using a rare separator
-        let compositeId = createCompositeId(appName: appName, dashboardId: dashboardId)
-        
-        // Check if dashboard exists and hasn't changed
-        if let existingDashboard = coreDataManager.findDashboard(by: compositeId) {
-            if existingDashboard.xmlHash == hashString {
-                print("⏭️ Dashboard '\(dashboardId)' in app '\(appName ?? "unknown")' unchanged, skipping")
-                return
-            } else {
-                print("🔄 Dashboard '\(dashboardId)' in app '\(appName ?? "unknown")' has changed, updating...")
-                context.delete(existingDashboard)
-            }
-        }
-        
-        // Create new dashboard entity
-        let dashboard = DashboardEntity(context: context)
-        dashboard.id = compositeId
-        dashboard.appName = appName
-        dashboard.dashboardName = dashboardId
-        dashboard.xmlContent = xmlContent
-        dashboard.xmlHash = hashString
-        dashboard.lastParsed = Date()
-        dashboard.createdAt = Date()
-        
-        // Parse dashboard attributes
-        try parseDashboardAttributes(from: root, into: dashboard)
-        
-        // Parse form inputs (fieldsets and tokens)
-        try parseForm(from: root, into: dashboard)
-        
-        // Parse dashboard rows and panels
-        try parseRows(from: root, into: dashboard)
-        
-        // Parse global searches
-        try parseGlobalSearches(from: root, into: dashboard)
-        
-        // Parse custom content
-        try parseCustomContent(from: root, into: dashboard)
-        
-        // Parse global token operations
-        try parseGlobalTokenOps(from: root, into: dashboard)
-        
-        // Parse namespace declarations
-        try parseNamespaces(from: root, into: dashboard)
-        
-        // Save to Core Data
-        coreDataManager.saveContext()
-        
-        print("✅ Dashboard '\(dashboardId)' from app '\(appName ?? "unknown")' loaded successfully")
+        // Use the new Studio format loader
+        try loadDashboardAsStudio(xmlContent: xmlContent, dashboardId: dashboardId, appName: appName)
     }
     
     // MARK: - Dashboard Parsing
@@ -689,13 +629,64 @@ public class DashboardLoader {
     
     /// Export complete CoreData object graph for a dashboard as JSON
     public func exportDashboardAsJSON(_ dashboardId: String) {
-        guard let dashboard = coreDataManager.findDashboard(by: dashboardId) else {
-            print("❌ Dashboard '\(dashboardId)' not found")
+        // First try to find the new Dashboard (Studio format)
+        let fetchRequest: NSFetchRequest<Dashboard> = Dashboard.fetchRequest()
+
+        // Try multiple matching strategies:
+        // 1. Exact match on dashboardId (for composite IDs like "search§my_another")
+        // 2. ENDSWITH match (for when user passes just "my_another")
+        // 3. Exact match on title
+        fetchRequest.predicate = NSPredicate(
+            format: "dashboardId == %@ OR dashboardId ENDSWITH %@ OR title == %@",
+            dashboardId,
+            "§" + dashboardId,
+            dashboardId
+        )
+
+        do {
+            let dashboards = try context.fetch(fetchRequest)
+            if let dashboard = dashboards.first {
+                // Found Studio format dashboard
+                print("📊 Exporting Dashboard (Studio Format)")
+                print("   Dashboard ID: \(dashboard.dashboardId ?? "N/A")")
+                print("   Title: \(dashboard.title ?? "N/A")")
+                print("")
+
+                // For Studio format, output the clean rawJSON instead of CoreData object graph
+                if let rawJSON = dashboard.rawJSON {
+                    // Pretty print the JSON
+                    if let jsonData = rawJSON.data(using: .utf8),
+                       let jsonObject = try? JSONSerialization.jsonObject(with: jsonData),
+                       let prettyData = try? JSONSerialization.data(withJSONObject: jsonObject, options: [.prettyPrinted, .sortedKeys]),
+                       let prettyString = String(data: prettyData, encoding: .utf8) {
+                        print(prettyString)
+                    } else {
+                        print(rawJSON)
+                    }
+                } else {
+                    print("⚠️ No rawJSON found for Studio dashboard, falling back to CoreData graph")
+                    let jsonData = try serializeCoreDataObjectToJSON(dashboard)
+                    if let jsonString = String(data: jsonData, encoding: .utf8) {
+                        print(jsonString)
+                    } else {
+                        print("❌ Failed to convert JSON data to string")
+                    }
+                }
+                return
+            }
+        } catch {
+            print("⚠️ Error searching for Studio format dashboard: \(error)")
+        }
+
+        // Fall back to old DashboardEntity format
+        guard let oldDashboard = coreDataManager.findDashboard(by: dashboardId) else {
+            print("❌ Dashboard '\(dashboardId)' not found in either format")
             return
         }
-        
+
+        print("📊 Exporting DashboardEntity (Legacy Format)")
         do {
-            let jsonData = try serializeCoreDataObjectToJSON(dashboard)
+            let jsonData = try serializeCoreDataObjectToJSON(oldDashboard)
             if let jsonString = String(data: jsonData, encoding: .utf8) {
                 print(jsonString)
             } else {
@@ -812,6 +803,495 @@ public class DashboardLoader {
             return value
         }
     }
+
+    // MARK: - Studio Format Loading
+
+    /// Load dashboard using the new Dashboard Studio format (data source-centric)
+    public func loadDashboardAsStudio(xmlContent: String, dashboardId: String, appName: String? = nil) throws {
+        print("🔄 Loading dashboard '\(dashboardId)' as Studio format...")
+
+        // Parse XML
+        let parser = SimpleXMLParser()
+        let root = try parser.parse(xmlString: xmlContent)
+
+        // Validate it's a dashboard
+        guard root.name == "dashboard" || root.name == "form" else {
+            throw DashboardLoadingError.notADashboard(rootElement: root.name)
+        }
+
+        // Check if this is a native Dashboard Studio format (version 2.x)
+        let studioConfig: DashboardStudioConfiguration
+        if let version = root.attribute("version"), version == "2" {
+            // Native Dashboard Studio format - extract JSON from <definition> CDATA
+            print("📊 Detected native Dashboard Studio format (version 2.x)")
+            studioConfig = try parseNativeStudioFormat(root: root)
+        } else {
+            // SimpleXML format - convert to Studio format
+            print("📄 Detected SimpleXML format - converting to Studio format")
+            let simpleXMLConfig = try parseToSimpleXMLConfig(root: root)
+            let converter = DashboardConverter()
+            studioConfig = converter.convertToStudio(simpleXMLConfig)
+        }
+
+        // Generate hash for change detection
+        let xmlHash = SHA256.hash(data: xmlContent.data(using: .utf8) ?? Data())
+        let hashString = xmlHash.compactMap { String(format: "%02x", $0) }.joined()
+
+        // Create unique composite ID
+        let compositeId = createCompositeId(appName: appName, dashboardId: dashboardId)
+
+        // Check if dashboard exists
+        let fetchRequest: NSFetchRequest<Dashboard> = Dashboard.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "dashboardId == %@", compositeId)
+
+        let existingDashboards = try context.fetch(fetchRequest)
+        if let existingDashboard = existingDashboards.first {
+            // Check if changed (compare hash from rawXML)
+            // For now, just delete and recreate
+            print("🔄 Dashboard exists, updating...")
+            context.delete(existingDashboard)
+        }
+
+        // Create new Dashboard entity (Studio format)
+        try saveDashboardStudioConfig(studioConfig, dashboardId: compositeId, appName: appName, xmlContent: xmlContent, xmlHash: hashString)
+
+        // Save to Core Data
+        coreDataManager.saveContext()
+
+        print("✅ Dashboard '\(dashboardId)' loaded in Studio format successfully")
+    }
+
+    /// Save DashboardStudioConfiguration to CoreData
+    private func saveDashboardStudioConfig(
+        _ config: DashboardStudioConfiguration,
+        dashboardId: String,
+        appName: String?,
+        xmlContent: String,
+        xmlHash: String
+    ) throws {
+        // Create Dashboard entity
+        let dashboard = Dashboard(context: context)
+        dashboard.id = UUID()
+        dashboard.dashboardId = dashboardId  // Store composite ID for lookups
+        dashboard.title = config.title
+        dashboard.dashboardDescription = config.description
+        dashboard.formatType = "studio"
+        dashboard.rawXML = xmlContent
+        dashboard.createdAt = Date()
+        dashboard.updatedAt = Date()
+
+        // Serialize studio config to JSON
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let jsonData = try? encoder.encode(config),
+           let jsonString = String(data: jsonData, encoding: .utf8) {
+            dashboard.rawJSON = jsonString
+        }
+
+        // Create DataSource entities
+        var dataSourceMap: [String: DataSource] = [:]
+        for (dsId, dsDefinition) in config.dataSources {
+            let dataSource = DataSource(context: context)
+            dataSource.id = UUID()
+            dataSource.sourceId = dsId
+            dataSource.name = dsDefinition.name
+            dataSource.type = dsDefinition.type
+            dataSource.query = dsDefinition.options?.query
+            dataSource.refresh = dsDefinition.options?.refresh
+            dataSource.refreshType = dsDefinition.options?.refreshType
+            dataSource.extendsId = dsDefinition.options?.extend ?? dsDefinition.extends
+            dataSource.dashboard = dashboard
+
+            // Serialize options to JSON
+            if let options = dsDefinition.options,
+               let optionsData = try? encoder.encode(options),
+               let optionsString = String(data: optionsData, encoding: .utf8) {
+                dataSource.optionsJSON = optionsString
+            }
+
+            dataSourceMap[dsId] = dataSource
+            dashboard.addToDataSources(dataSource)
+        }
+
+        // Create Visualization entities
+        for (vizId, vizDefinition) in config.visualizations {
+            let visualization = Visualization(context: context)
+            visualization.id = UUID()
+            visualization.vizId = vizId
+            visualization.type = vizDefinition.type
+            visualization.title = vizDefinition.title
+            visualization.encoding = vizDefinition.encoding
+            visualization.dashboard = dashboard
+
+            // Link to data source
+            if let primaryDS = vizDefinition.dataSources?.primary,
+               let dataSource = dataSourceMap[primaryDS] {
+                visualization.dataSource = dataSource
+                dataSource.addToVisualizations(visualization)
+            }
+
+            // Serialize options to JSON
+            if let options = vizDefinition.options,
+               let optionsData = try? encoder.encode(options),
+               let optionsString = String(data: optionsData, encoding: .utf8) {
+                visualization.optionsJSON = optionsString
+            }
+
+            // Serialize context to JSON
+            if let context = vizDefinition.context,
+               let contextData = try? encoder.encode(context),
+               let contextString = String(data: contextData, encoding: .utf8) {
+                visualization.contextJSON = contextString
+            }
+
+            dashboard.addToVisualizations(visualization)
+        }
+
+        // Create DashboardInput entities
+        if let inputs = config.inputs {
+            for (inputId, inputDef) in inputs {
+                let input = DashboardInput(context: context)
+                input.id = UUID()
+                input.inputId = inputId
+                input.type = inputDef.type
+                input.title = inputDef.title
+
+                // Extract token - check both top-level and options.token
+                if let token = inputDef.token {
+                    input.token = token
+                } else if let options = inputDef.options,
+                          let tokenValue = options["token"]?.value as? String {
+                    input.token = tokenValue
+                }
+
+                // Extract defaultValue - check both top-level and options.defaultValue
+                if let defaultValue = inputDef.defaultValue {
+                    input.defaultValue = defaultValue
+                } else if let options = inputDef.options,
+                          let defaultValue = options["defaultValue"]?.value as? String {
+                    input.defaultValue = defaultValue
+                }
+
+                input.dashboard = dashboard
+
+                // Serialize options to JSON if they exist
+                if let options = inputDef.options,
+                   let optionsData = try? encoder.encode(options),
+                   let optionsString = String(data: optionsData, encoding: .utf8) {
+                    input.optionsJSON = optionsString
+                }
+
+                dashboard.addToInputs(input)
+            }
+        }
+
+        // Create DashboardLayout entity
+        let layout = DashboardLayout(context: context)
+        layout.id = UUID()
+        layout.type = config.layout.type?.rawValue ?? "absolute"
+        layout.dashboard = dashboard
+        dashboard.layout = layout
+
+        // Create LayoutItem entities (if structure exists - for converted SimpleXML)
+        if let structure = config.layout.structure {
+            for structureItem in structure {
+                let layoutItem = LayoutItem(context: context)
+                layoutItem.id = UUID()
+                layoutItem.type = structureItem.type.rawValue
+                layoutItem.x = Int32(structureItem.position.x ?? 0)
+                layoutItem.y = Int32(structureItem.position.y ?? 0)
+                layoutItem.width = Int32(structureItem.position.w ?? 0)
+                layoutItem.height = Int32(structureItem.position.h ?? 0)
+                layoutItem.layout = layout
+                layout.addToLayoutItems(layoutItem)
+
+                // Link layout item to visualization if it's a block type
+                if structureItem.type == .block,
+                   let viz = dashboard.visualizations?.first(where: { ($0 as? Visualization)?.vizId == structureItem.item }) as? Visualization {
+                    layoutItem.visualization = viz
+                    viz.layoutItem = layoutItem
+                }
+            }
+        }
+    }
+
+    /// Parse SimpleXML element to SimpleXMLConfiguration
+    /// This is a simplified version - you may need to expand this based on your SimpleXML models
+    private func parseToSimpleXMLConfig(root: SimpleXMLElement) throws -> SimpleXMLConfiguration {
+        // This is a placeholder - you'll need to implement the full parsing
+        // For now, return a minimal config
+        let label = root.element(named: "label")?.value ?? "Untitled"
+        let description = root.element(named: "description")?.value
+
+        var rows: [SimpleXMLRow] = []
+        var fieldsets: [SimpleXMLFieldset]? = nil
+
+        // Parse rows and panels (simplified)
+        for rowElement in root.elements(named: "row") {
+            var panels: [SimpleXMLPanel] = []
+
+            for panelElement in rowElement.elements(named: "panel") {
+                // Parse panel
+                let title = panelElement.element(named: "title")?.value
+
+                // Find visualization type (table, chart, etc.)
+                var vizType: SimpleXMLVisualizationType = .table
+                var search: SimpleXMLSearch? = nil
+
+                // Check for different viz types and extract options
+                var vizOptions: [String: String] = [:]
+                var formatOptions: [String: String] = [:]
+
+                if let tableElement = panelElement.element(named: "table") {
+                    vizType = .table
+                    if let searchElement = tableElement.element(named: "search") {
+                        search = parseSearch(from: searchElement)
+                    }
+                    let extracted = tableElement.extractAllOptions()
+                    (vizOptions, formatOptions) = extractOptionsAndFormatsFromStructure(extracted)
+                } else if let chartElement = panelElement.element(named: "chart") {
+                    vizType = .chart
+                    if let searchElement = chartElement.element(named: "search") {
+                        search = parseSearch(from: searchElement)
+                    }
+                    let extracted = chartElement.extractAllOptions()
+                    (vizOptions, formatOptions) = extractOptionsAndFormatsFromStructure(extracted)
+                } else if let singleElement = panelElement.element(named: "single") {
+                    vizType = .single
+                    if let searchElement = singleElement.element(named: "search") {
+                        search = parseSearch(from: searchElement)
+                    }
+                    let extracted = singleElement.extractAllOptions()
+                    (vizOptions, formatOptions) = extractOptionsAndFormatsFromStructure(extracted)
+                }
+
+                let visualization = SimpleXMLVisualization(
+                    type: vizType,
+                    options: vizOptions,
+                    formatElements: formatOptions
+                )
+                let panel = SimpleXMLPanel(
+                    title: title,
+                    visualization: visualization,
+                    search: search
+                )
+                panels.append(panel)
+            }
+
+            if !panels.isEmpty {
+                rows.append(SimpleXMLRow(panels: panels))
+            }
+        }
+
+        // Parse fieldsets (inputs)
+        let fieldsetElements = root.elements(named: "fieldset")
+        if !fieldsetElements.isEmpty {
+            var parsedFieldsets: [SimpleXMLFieldset] = []
+
+            for fieldsetElement in fieldsetElements {
+                var inputs: [SimpleXMLInput] = []
+
+                for inputElement in fieldsetElement.elements(named: "input") {
+                    if let type = inputElement.attribute("type"),
+                       let token = inputElement.attribute("token") {
+                        let inputType = mapInputType(type)
+                        let label = inputElement.element(named: "label")?.value
+                        let defaultValue = inputElement.element(named: "default")?.value
+
+                        // Parse choices for dropdown/radio/multiselect
+                        var choices: [SimpleXMLInputChoice] = []
+                        for choiceElement in inputElement.elements(named: "choice") {
+                            if let value = choiceElement.attribute("value") {
+                                let choiceLabel = choiceElement.value ?? value
+                                choices.append(SimpleXMLInputChoice(value: value, label: choiceLabel))
+                            }
+                        }
+
+                        let input = SimpleXMLInput(
+                            type: inputType,
+                            token: token,
+                            label: label,
+                            defaultValue: defaultValue,
+                            choices: choices
+                        )
+                        inputs.append(input)
+                    }
+                }
+
+                if !inputs.isEmpty {
+                    parsedFieldsets.append(SimpleXMLFieldset(inputs: inputs))
+                }
+            }
+
+            if !parsedFieldsets.isEmpty {
+                fieldsets = parsedFieldsets
+            }
+        }
+
+        return SimpleXMLConfiguration(
+            label: label,
+            description: description,
+            rows: rows,
+            fieldsets: fieldsets
+        )
+    }
+
+    private func parseSearch(from searchElement: SimpleXMLElement) -> SimpleXMLSearch? {
+        let query = searchElement.element(named: "query")?.value
+        let earliest = searchElement.element(named: "earliest")?.value
+        let latest = searchElement.element(named: "latest")?.value
+        let refresh = searchElement.element(named: "refresh")?.value
+        let refreshType = searchElement.element(named: "refreshType")?.value
+
+        // Extract search attributes for chaining and referencing
+        let id = searchElement.attribute("id")
+        let base = searchElement.attribute("base")
+        let ref = searchElement.attribute("ref")
+
+        // Saved searches (ref) don't have inline queries
+        // Regular searches and chains require a query
+        if ref == nil && query == nil {
+            return nil
+        }
+
+        return SimpleXMLSearch(
+            query: query ?? "",  // Empty string for saved searches
+            earliest: earliest,
+            latest: latest,
+            refresh: refresh,
+            refreshType: refreshType,
+            id: id,
+            base: base,
+            ref: ref
+        )
+    }
+
+    /// Parse native Dashboard Studio format (version 2.x) from XML
+    /// Extracts JSON definition from <definition> CDATA section
+    private func parseNativeStudioFormat(root: SimpleXMLElement) throws -> DashboardStudioConfiguration {
+        // Find the <definition> element
+        guard let definitionElement = root.element(named: "definition"),
+              let jsonString = definitionElement.value else {
+            throw DashboardLoadingError.invalidFormat(message: "No <definition> element found in Dashboard Studio format")
+        }
+
+        // Parse the JSON
+        guard let jsonData = jsonString.data(using: .utf8) else {
+            throw DashboardLoadingError.invalidFormat(message: "Failed to convert definition to data")
+        }
+
+        let decoder = JSONDecoder()
+        do {
+            let config = try decoder.decode(DashboardStudioConfiguration.self, from: jsonData)
+            return config
+        } catch {
+            throw DashboardLoadingError.invalidFormat(message: "Failed to parse Dashboard Studio JSON: \(error.localizedDescription)")
+        }
+    }
+
+    /// Separate flattened options into regular options and format elements
+    /// Convert to strings but preserve the original value for better parsing
+    /// Extract options and formats from the nested structure returned by extractAllOptions()
+    private func extractOptionsAndFormatsFromStructure(_ structure: [String: Any]) -> (options: [String: String], formats: [String: String]) {
+        var options: [String: String] = [:]
+        var formats: [String: String] = [:]
+
+        // Extract simple options
+        if let optionsDict = structure["options"] as? [String: String] {
+            options = optionsDict
+        }
+
+        // Extract and flatten format elements
+        if let formatsArray = structure["formats"] as? [[String: Any]] {
+            for (index, formatDict) in formatsArray.enumerated() {
+                // Get field name
+                let field = formatDict["field"] as? String ?? "field\(index)"
+
+                // Flatten the format dictionary into format.field.property keys
+                for (key, value) in formatDict {
+                    if key == "field" { continue } // Skip the field key itself
+
+                    let formatKey: String
+                    if let nestedDict = value as? [String: Any] {
+                        // For nested dictionaries like palette or scale
+                        for (nestedKey, nestedValue) in nestedDict {
+                            let fullKey = "format.\(field).\(key).\(nestedKey)"
+                            // Convert value to proper string representation
+                            if let str = nestedValue as? String {
+                                formats[fullKey] = str
+                            } else if let jsonData = try? JSONSerialization.data(withJSONObject: nestedValue, options: []),
+                                      let jsonString = String(data: jsonData, encoding: .utf8) {
+                                formats[fullKey] = jsonString
+                            } else {
+                                formats[fullKey] = String(describing: nestedValue)
+                            }
+                        }
+                    } else {
+                        // For simple values
+                        formatKey = "format.\(field).\(key)"
+                        if let str = value as? String {
+                            formats[formatKey] = str
+                        } else if let jsonData = try? JSONSerialization.data(withJSONObject: value, options: []),
+                                  let jsonString = String(data: jsonData, encoding: .utf8) {
+                            formats[formatKey] = jsonString
+                        } else {
+                            formats[formatKey] = String(describing: value)
+                        }
+                    }
+                }
+            }
+        }
+
+        return (options, formats)
+    }
+
+    private func separateOptionsAndFormats(_ allOptions: [String: Any]) -> (options: [String: String], formats: [String: String]) {
+        var options: [String: String] = [:]
+        var formats: [String: String] = [:]
+
+        for (key, value) in allOptions {
+            // Convert to string representation
+            let stringValue: String
+            if let strVal = value as? String {
+                stringValue = strVal
+            } else if let intVal = value as? Int {
+                stringValue = String(intVal)
+            } else if let doubleVal = value as? Double {
+                stringValue = String(doubleVal)
+            } else if let boolVal = value as? Bool {
+                stringValue = boolVal ? "true" : "false"
+            } else {
+                // For complex types (arrays, dictionaries), JSON-encode them properly
+                if let jsonData = try? JSONSerialization.data(withJSONObject: value, options: []),
+                   let jsonString = String(data: jsonData, encoding: .utf8) {
+                    stringValue = jsonString
+                } else {
+                    // Fallback to string description only if JSON encoding fails
+                    stringValue = String(describing: value)
+                }
+            }
+
+            if key.hasPrefix("format.") {
+                formats[key] = stringValue
+            } else {
+                options[key] = stringValue
+            }
+        }
+
+        return (options, formats)
+    }
+
+    private func mapInputType(_ type: String) -> SimpleXMLInputType {
+        switch type.lowercased() {
+        case "time": return .time
+        case "dropdown": return .dropdown
+        case "radio": return .radio
+        case "multiselect": return .multiselect
+        case "text": return .text
+        case "checkbox": return .checkbox
+        default: return .text
+        }
+    }
 }
 
 // MARK: - String Extension for Formatting
@@ -830,7 +1310,8 @@ public enum DashboardLoadingError: Error, LocalizedError {
     case notADashboard(rootElement: String)
     case parsingFailed(error: Error)
     case saveFailed(error: Error)
-    
+    case invalidFormat(message: String)
+
     public var errorDescription: String? {
         switch self {
         case .fileNotFound(let path):
@@ -841,6 +1322,8 @@ public enum DashboardLoadingError: Error, LocalizedError {
             return "Dashboard parsing failed: \(error.localizedDescription)"
         case .saveFailed(let error):
             return "Failed to save dashboard: \(error.localizedDescription)"
+        case .invalidFormat(let message):
+            return "Invalid dashboard format: \(message)"
         }
     }
 }

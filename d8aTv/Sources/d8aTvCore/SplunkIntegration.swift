@@ -642,7 +642,8 @@ public class SplunkDashboardService {
         var searchQuery = "| rest /servicesNS/-/\(finalApp)/data/ui/views"
         
         // Filter for dashboards only (exclude other view types)
-        searchQuery += " | where match('eai:type', \"views\") AND NOT match ('eai:data',\"version=.2.\")  AND NOT match ('eai:data',\"script=.*?js\")  AND isDashboard=1 AND ( like(rootNode,\"dashboard\") OR like(rootNode,\"form\") ) "
+        // Now includes Dashboard Studio format (version 2.x)
+        searchQuery += " | where match('eai:type', \"views\") AND NOT match ('eai:data',\"script=.*?js\")  AND isDashboard=1 AND ( like(rootNode,\"dashboard\") OR like(rootNode,\"form\") ) "
         
         
         // Select and rename fields for easier parsing

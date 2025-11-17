@@ -8,7 +8,7 @@ public class CoreDataModelConfiguration {
     public static func createModel() -> NSManagedObjectModel {
         let model = NSManagedObjectModel()
         
-        // Create entities
+        // Create entities - Legacy SimpleXML format
         let dashboardEntity = createDashboardEntity()
         let rowEntity = createRowEntity()
         let panelEntity = createPanelEntity()
@@ -24,8 +24,17 @@ public class CoreDataModelConfiguration {
         let namespaceEntity = createNamespaceEntity()
         let searchExecutionEntity = createSearchExecutionEntity()
         let searchResultEntity = createSearchResultEntity()
+
+        // Create entities - New Studio format
+        let dashboardStudio = createDashboardStudioEntity()
+        let dataSourceEntity = createDataSourceEntity()
+        let visualizationStudio = createVisualizationStudioEntity()
+        let dashboardInputEntity = createDashboardInputEntity()
+        let dashboardLayoutEntity = createDashboardLayoutEntity()
+        let layoutItemEntity = createLayoutItemEntity()
+        let dataSourceConfigEntity = createDataSourceConfigEntity()
         
-        // Configure relationships
+        // Configure relationships - Legacy format
         configureRelationships(
             dashboard: dashboardEntity,
             row: rowEntity,
@@ -43,8 +52,20 @@ public class CoreDataModelConfiguration {
             searchExecution: searchExecutionEntity,
             searchResult: searchResultEntity
         )
+
+        // Configure relationships - Studio format
+        configureStudioRelationships(
+            dashboard: dashboardStudio,
+            dataSource: dataSourceEntity,
+            visualization: visualizationStudio,
+            input: dashboardInputEntity,
+            layout: dashboardLayoutEntity,
+            layoutItem: layoutItemEntity,
+            dataSourceConfig: dataSourceConfigEntity
+        )
         
         model.entities = [
+            // Legacy SimpleXML format
             dashboardEntity,
             rowEntity,
             panelEntity,
@@ -59,7 +80,15 @@ public class CoreDataModelConfiguration {
             customContentEntity,
             namespaceEntity,
             searchExecutionEntity,
-            searchResultEntity
+            searchResultEntity,
+            // New Studio format
+            dashboardStudio,
+            dataSourceEntity,
+            visualizationStudio,
+            dashboardInputEntity,
+            dashboardLayoutEntity,
+            layoutItemEntity,
+            dataSourceConfigEntity
         ]
         
         return model
@@ -711,7 +740,190 @@ public class CoreDataModelConfiguration {
         // Add more relationships as needed...
         // (This is a simplified version - full implementation would include all relationships)
     }
-    
+
+    // MARK: - Studio Format Relationship Configuration
+
+    private static func configureStudioRelationships(
+        dashboard: NSEntityDescription,
+        dataSource: NSEntityDescription,
+        visualization: NSEntityDescription,
+        input: NSEntityDescription,
+        layout: NSEntityDescription,
+        layoutItem: NSEntityDescription,
+        dataSourceConfig: NSEntityDescription
+    ) {
+        // Dashboard -> DataSources (one-to-many)
+        let dashboardDataSources = NSRelationshipDescription()
+        dashboardDataSources.name = "dataSources"
+        dashboardDataSources.destinationEntity = dataSource
+        dashboardDataSources.maxCount = 0
+        dashboardDataSources.deleteRule = .cascadeDeleteRule
+
+        let dataSourceDashboard = NSRelationshipDescription()
+        dataSourceDashboard.name = "dashboard"
+        dataSourceDashboard.destinationEntity = dashboard
+        dataSourceDashboard.maxCount = 1
+        dataSourceDashboard.deleteRule = .nullifyDeleteRule
+
+        dashboardDataSources.inverseRelationship = dataSourceDashboard
+        dataSourceDashboard.inverseRelationship = dashboardDataSources
+
+        dashboard.properties.append(dashboardDataSources)
+        dataSource.properties.append(dataSourceDashboard)
+
+        // Dashboard -> Visualizations (one-to-many)
+        let dashboardVisualizations = NSRelationshipDescription()
+        dashboardVisualizations.name = "visualizations"
+        dashboardVisualizations.destinationEntity = visualization
+        dashboardVisualizations.maxCount = 0
+        dashboardVisualizations.deleteRule = .cascadeDeleteRule
+
+        let visualizationDashboard = NSRelationshipDescription()
+        visualizationDashboard.name = "dashboard"
+        visualizationDashboard.destinationEntity = dashboard
+        visualizationDashboard.maxCount = 1
+        visualizationDashboard.deleteRule = .nullifyDeleteRule
+
+        dashboardVisualizations.inverseRelationship = visualizationDashboard
+        visualizationDashboard.inverseRelationship = dashboardVisualizations
+
+        dashboard.properties.append(dashboardVisualizations)
+        visualization.properties.append(visualizationDashboard)
+
+        // Dashboard -> Inputs (one-to-many)
+        let dashboardInputs = NSRelationshipDescription()
+        dashboardInputs.name = "inputs"
+        dashboardInputs.destinationEntity = input
+        dashboardInputs.maxCount = 0
+        dashboardInputs.deleteRule = .cascadeDeleteRule
+
+        let inputDashboard = NSRelationshipDescription()
+        inputDashboard.name = "dashboard"
+        inputDashboard.destinationEntity = dashboard
+        inputDashboard.maxCount = 1
+        inputDashboard.deleteRule = .nullifyDeleteRule
+
+        dashboardInputs.inverseRelationship = inputDashboard
+        inputDashboard.inverseRelationship = dashboardInputs
+
+        dashboard.properties.append(dashboardInputs)
+        input.properties.append(inputDashboard)
+
+        // Dashboard -> Layout (one-to-one)
+        let dashboardLayout = NSRelationshipDescription()
+        dashboardLayout.name = "layout"
+        dashboardLayout.destinationEntity = layout
+        dashboardLayout.maxCount = 1
+        dashboardLayout.deleteRule = .cascadeDeleteRule
+
+        let layoutDashboard = NSRelationshipDescription()
+        layoutDashboard.name = "dashboard"
+        layoutDashboard.destinationEntity = dashboard
+        layoutDashboard.maxCount = 1
+        layoutDashboard.deleteRule = .nullifyDeleteRule
+
+        dashboardLayout.inverseRelationship = layoutDashboard
+        layoutDashboard.inverseRelationship = dashboardLayout
+
+        dashboard.properties.append(dashboardLayout)
+        layout.properties.append(layoutDashboard)
+
+        // DataSource -> Visualizations (one-to-many)
+        let dataSourceVisualizations = NSRelationshipDescription()
+        dataSourceVisualizations.name = "visualizations"
+        dataSourceVisualizations.destinationEntity = visualization
+        dataSourceVisualizations.maxCount = 0
+        dataSourceVisualizations.deleteRule = .nullifyDeleteRule
+
+        let visualizationDataSource = NSRelationshipDescription()
+        visualizationDataSource.name = "dataSource"
+        visualizationDataSource.destinationEntity = dataSource
+        visualizationDataSource.maxCount = 1
+        visualizationDataSource.deleteRule = .nullifyDeleteRule
+
+        dataSourceVisualizations.inverseRelationship = visualizationDataSource
+        visualizationDataSource.inverseRelationship = dataSourceVisualizations
+
+        dataSource.properties.append(dataSourceVisualizations)
+        visualization.properties.append(visualizationDataSource)
+
+        // Layout -> LayoutItems (one-to-many)
+        let layoutItems = NSRelationshipDescription()
+        layoutItems.name = "layoutItems"
+        layoutItems.destinationEntity = layoutItem
+        layoutItems.maxCount = 0
+        layoutItems.deleteRule = .cascadeDeleteRule
+
+        let layoutItemLayout = NSRelationshipDescription()
+        layoutItemLayout.name = "layout"
+        layoutItemLayout.destinationEntity = layout
+        layoutItemLayout.maxCount = 1
+        layoutItemLayout.deleteRule = .nullifyDeleteRule
+
+        layoutItems.inverseRelationship = layoutItemLayout
+        layoutItemLayout.inverseRelationship = layoutItems
+
+        layout.properties.append(layoutItems)
+        layoutItem.properties.append(layoutItemLayout)
+
+        // LayoutItem -> Visualization (one-to-one)
+        let layoutItemVisualization = NSRelationshipDescription()
+        layoutItemVisualization.name = "visualization"
+        layoutItemVisualization.destinationEntity = visualization
+        layoutItemVisualization.maxCount = 1
+        layoutItemVisualization.deleteRule = .nullifyDeleteRule
+
+        let visualizationLayoutItem = NSRelationshipDescription()
+        visualizationLayoutItem.name = "layoutItem"
+        visualizationLayoutItem.destinationEntity = layoutItem
+        visualizationLayoutItem.maxCount = 1
+        visualizationLayoutItem.deleteRule = .nullifyDeleteRule
+
+        layoutItemVisualization.inverseRelationship = visualizationLayoutItem
+        visualizationLayoutItem.inverseRelationship = layoutItemVisualization
+
+        layoutItem.properties.append(layoutItemVisualization)
+        visualization.properties.append(visualizationLayoutItem)
+
+        // LayoutItem -> Input (one-to-one)
+        let layoutItemInput = NSRelationshipDescription()
+        layoutItemInput.name = "input"
+        layoutItemInput.destinationEntity = input
+        layoutItemInput.maxCount = 1
+        layoutItemInput.deleteRule = .nullifyDeleteRule
+
+        let inputLayoutItem = NSRelationshipDescription()
+        inputLayoutItem.name = "layoutItem"
+        inputLayoutItem.destinationEntity = layoutItem
+        inputLayoutItem.maxCount = 1
+        inputLayoutItem.deleteRule = .nullifyDeleteRule
+
+        layoutItemInput.inverseRelationship = inputLayoutItem
+        inputLayoutItem.inverseRelationship = layoutItemInput
+
+        layoutItem.properties.append(layoutItemInput)
+        input.properties.append(inputLayoutItem)
+
+        // Dashboard -> DataSourceConfig (one-to-one)
+        let dashboardDataSourceConfig = NSRelationshipDescription()
+        dashboardDataSourceConfig.name = "dataSourceConfig"
+        dashboardDataSourceConfig.destinationEntity = dataSourceConfig
+        dashboardDataSourceConfig.maxCount = 1
+        dashboardDataSourceConfig.deleteRule = .cascadeDeleteRule
+
+        let dataSourceConfigDashboards = NSRelationshipDescription()
+        dataSourceConfigDashboards.name = "dashboards"
+        dataSourceConfigDashboards.destinationEntity = dashboard
+        dataSourceConfigDashboards.maxCount = 0
+        dataSourceConfigDashboards.deleteRule = .nullifyDeleteRule
+
+        dashboardDataSourceConfig.inverseRelationship = dataSourceConfigDashboards
+        dataSourceConfigDashboards.inverseRelationship = dashboardDataSourceConfig
+
+        dashboard.properties.append(dashboardDataSourceConfig)
+        dataSourceConfig.properties.append(dataSourceConfigDashboards)
+    }
+
     // MARK: - Helper Methods
     
     private static func createAttribute(name: String, type: NSAttributeType, optional: Bool = true, defaultValue: Any? = nil) -> NSAttributeDescription {
@@ -723,5 +935,132 @@ public class CoreDataModelConfiguration {
             attribute.defaultValue = defaultValue
         }
         return attribute
+    }
+
+    // MARK: - Studio Format Entity Creation
+
+    private static func createDashboardStudioEntity() -> NSEntityDescription {
+        let entity = NSEntityDescription()
+        entity.name = "Dashboard"
+        entity.managedObjectClassName = "DashboardKit.Dashboard"
+
+        entity.properties = [
+            createAttribute(name: "id", type: .UUIDAttributeType),
+            createAttribute(name: "dashboardId", type: .stringAttributeType),  // Composite ID (app§name)
+            createAttribute(name: "title", type: .stringAttributeType),
+            createAttribute(name: "dashboardDescription", type: .stringAttributeType),
+            createAttribute(name: "formatType", type: .stringAttributeType),
+            createAttribute(name: "rawJSON", type: .stringAttributeType),
+            createAttribute(name: "rawXML", type: .stringAttributeType),
+            createAttribute(name: "createdAt", type: .dateAttributeType),
+            createAttribute(name: "updatedAt", type: .dateAttributeType),
+            createAttribute(name: "defaultsJSON", type: .stringAttributeType)
+        ]
+
+        return entity
+    }
+
+    private static func createDataSourceEntity() -> NSEntityDescription {
+        let entity = NSEntityDescription()
+        entity.name = "DataSource"
+        entity.managedObjectClassName = "DashboardKit.DataSource"
+
+        entity.properties = [
+            createAttribute(name: "id", type: .UUIDAttributeType),
+            createAttribute(name: "sourceId", type: .stringAttributeType),
+            createAttribute(name: "name", type: .stringAttributeType),
+            createAttribute(name: "type", type: .stringAttributeType),
+            createAttribute(name: "query", type: .stringAttributeType),
+            createAttribute(name: "refresh", type: .stringAttributeType),
+            createAttribute(name: "refreshType", type: .stringAttributeType),
+            createAttribute(name: "optionsJSON", type: .stringAttributeType),
+            createAttribute(name: "extendsId", type: .stringAttributeType)
+        ]
+
+        return entity
+    }
+
+    private static func createVisualizationStudioEntity() -> NSEntityDescription {
+        let entity = NSEntityDescription()
+        entity.name = "Visualization"
+        entity.managedObjectClassName = "DashboardKit.Visualization"
+
+        entity.properties = [
+            createAttribute(name: "id", type: .UUIDAttributeType),
+            createAttribute(name: "vizId", type: .stringAttributeType),
+            createAttribute(name: "type", type: .stringAttributeType),
+            createAttribute(name: "title", type: .stringAttributeType),
+            createAttribute(name: "optionsJSON", type: .stringAttributeType),
+            createAttribute(name: "contextJSON", type: .stringAttributeType),
+            createAttribute(name: "encoding", type: .stringAttributeType)
+        ]
+
+        return entity
+    }
+
+    private static func createDashboardInputEntity() -> NSEntityDescription {
+        let entity = NSEntityDescription()
+        entity.name = "DashboardInput"
+        entity.managedObjectClassName = "DashboardKit.DashboardInput"
+
+        entity.properties = [
+            createAttribute(name: "id", type: .UUIDAttributeType),
+            createAttribute(name: "inputId", type: .stringAttributeType),
+            createAttribute(name: "type", type: .stringAttributeType),
+            createAttribute(name: "title", type: .stringAttributeType),
+            createAttribute(name: "token", type: .stringAttributeType),
+            createAttribute(name: "defaultValue", type: .stringAttributeType),
+            createAttribute(name: "optionsJSON", type: .stringAttributeType)
+        ]
+
+        return entity
+    }
+
+    private static func createDashboardLayoutEntity() -> NSEntityDescription {
+        let entity = NSEntityDescription()
+        entity.name = "DashboardLayout"
+        entity.managedObjectClassName = "DashboardKit.DashboardLayout"
+
+        entity.properties = [
+            createAttribute(name: "id", type: .UUIDAttributeType),
+            createAttribute(name: "type", type: .stringAttributeType),
+            createAttribute(name: "optionsJSON", type: .stringAttributeType),
+            createAttribute(name: "globalInputs", type: .stringAttributeType)
+        ]
+
+        return entity
+    }
+
+    private static func createLayoutItemEntity() -> NSEntityDescription {
+        let entity = NSEntityDescription()
+        entity.name = "LayoutItem"
+        entity.managedObjectClassName = "DashboardKit.LayoutItem"
+
+        entity.properties = [
+            createAttribute(name: "id", type: .UUIDAttributeType),
+            createAttribute(name: "type", type: .stringAttributeType),
+            createAttribute(name: "x", type: .integer32AttributeType, optional: false, defaultValue: 0),
+            createAttribute(name: "y", type: .integer32AttributeType, optional: false, defaultValue: 0),
+            createAttribute(name: "width", type: .integer32AttributeType, optional: false, defaultValue: 0),
+            createAttribute(name: "height", type: .integer32AttributeType, optional: false, defaultValue: 0),
+            createAttribute(name: "bootstrapWidth", type: .stringAttributeType),
+            createAttribute(name: "position", type: .integer32AttributeType, optional: false, defaultValue: 0)
+        ]
+
+        return entity
+    }
+
+    private static func createDataSourceConfigEntity() -> NSEntityDescription {
+        let entity = NSEntityDescription()
+        entity.name = "DataSourceConfig"
+        entity.managedObjectClassName = "DashboardKit.DataSourceConfig"
+
+        entity.properties = [
+            createAttribute(name: "id", type: .UUIDAttributeType),
+            createAttribute(name: "configType", type: .stringAttributeType),
+            createAttribute(name: "configJSON", type: .stringAttributeType)
+        ]
+
+        return entity
     }
 }

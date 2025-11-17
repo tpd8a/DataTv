@@ -87,9 +87,10 @@ public actor DashboardStudioParser {
             }
         }
 
-        // Validate layout references
-        for structureItem in configuration.layout.structure {
-            switch structureItem.type {
+        // Validate layout references (if structure exists - for converted SimpleXML)
+        if let structure = configuration.layout.structure {
+            for structureItem in structure {
+                switch structureItem.type {
             case .block:
                 guard configuration.visualizations[structureItem.item] != nil else {
                     throw ParserError.invalidLayoutReference(
@@ -104,8 +105,9 @@ public actor DashboardStudioParser {
                         item: structureItem.item
                     )
                 }
-            case .line:
-                break // No validation needed for lines
+                case .line:
+                    break // No validation needed for lines
+                }
             }
         }
     }

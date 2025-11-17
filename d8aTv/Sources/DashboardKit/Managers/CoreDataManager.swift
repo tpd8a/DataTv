@@ -11,8 +11,6 @@ public actor CoreDataManager {
     // MARK: - Initialization
 
     private init() {
-        persistentContainer = NSPersistentContainer(name: "DashboardModel")
-
         // Load the model from the bundle
         guard let modelURL = Bundle.module.url(forResource: "DashboardModel", withExtension: "momd"),
               let model = NSManagedObjectModel(contentsOf: modelURL) else {
@@ -27,7 +25,7 @@ public actor CoreDataManager {
         }
 
         persistentContainer.viewContext.automaticallyMergesChangesFromParent = true
-        persistentContainer.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+        persistentContainer.viewContext.mergePolicy = NSMergePolicy.mergeByPropertyObjectTrump
     }
 
     public var viewContext: NSManagedObjectContext {

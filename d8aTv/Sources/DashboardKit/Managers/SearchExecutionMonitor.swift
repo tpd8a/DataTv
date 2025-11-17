@@ -141,8 +141,8 @@ public class SearchExecutionMonitor: ObservableObject {
 
     // MARK: - Cleanup
 
-    deinit {
-        stopMonitoring()
+    nonisolated deinit {
+        monitoringTask?.cancel()
     }
 }
 
@@ -152,7 +152,7 @@ extension CoreDataManager {
 
     /// Fetch all active (non-completed) search executions
     public func fetchActiveSearchExecutions() async throws -> [SearchExecutionSummary] {
-        return try await context.perform {
+        return try await viewContext.perform {
             let request = NSFetchRequest<NSManagedObject>(entityName: "SearchExecution")
             request.predicate = NSPredicate(format: "status IN %@", [
                 SearchStatus.queued.rawValue,
@@ -194,7 +194,7 @@ extension CoreDataManager {
 
     /// Fetch search execution history for a data source
     public func fetchSearchHistory(dataSourceId: UUID, limit: Int = 100) async throws -> [SearchExecutionSummary] {
-        return try await context.perform {
+        return try await viewContext.perform {
             let request = NSFetchRequest<NSManagedObject>(entityName: "SearchExecution")
             request.predicate = NSPredicate(format: "dataSource.id == %@", dataSourceId as CVarArg)
             request.sortDescriptors = [NSSortDescriptor(key: "startTime", ascending: false)]
