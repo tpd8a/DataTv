@@ -49,11 +49,17 @@ public struct SimpleXMLPanel: Sendable {
 /// SimpleXML visualization
 public struct SimpleXMLVisualization: Sendable {
     public let type: SimpleXMLVisualizationType
-    public let options: [String: String]
+    public let options: [String: String]           // Flattened options
+    public let formatElements: [String: String]     // Flattened format.field.property keys
 
-    public init(type: SimpleXMLVisualizationType, options: [String: String] = [:]) {
+    public init(
+        type: SimpleXMLVisualizationType,
+        options: [String: String] = [:],
+        formatElements: [String: String] = [:]
+    ) {
         self.type = type
         self.options = options
+        self.formatElements = formatElements
     }
 }
 
@@ -74,19 +80,28 @@ public struct SimpleXMLSearch: Sendable {
     public let latest: String?
     public let refresh: String?
     public let refreshType: String?
+    public let id: String?          // Search ID for named searches
+    public let base: String?        // Base search to chain from
+    public let ref: String?         // Reference to existing search
 
     public init(
         query: String,
         earliest: String? = nil,
         latest: String? = nil,
         refresh: String? = nil,
-        refreshType: String? = nil
+        refreshType: String? = nil,
+        id: String? = nil,
+        base: String? = nil,
+        ref: String? = nil
     ) {
         self.query = query
         self.earliest = earliest
         self.latest = latest
         self.refresh = refresh
         self.refreshType = refreshType
+        self.id = id
+        self.base = base
+        self.ref = ref
     }
 }
 
@@ -110,19 +125,33 @@ public struct SimpleXMLInput: Sendable {
     public let label: String?
     public let defaultValue: String?
     public let searchWhenChanged: Bool
+    public let choices: [SimpleXMLInputChoice]  // Dropdown/radio choices
 
     public init(
         type: SimpleXMLInputType,
         token: String,
         label: String? = nil,
         defaultValue: String? = nil,
-        searchWhenChanged: Bool = true
+        searchWhenChanged: Bool = true,
+        choices: [SimpleXMLInputChoice] = []
     ) {
         self.type = type
         self.token = token
         self.label = label
         self.defaultValue = defaultValue
         self.searchWhenChanged = searchWhenChanged
+        self.choices = choices
+    }
+}
+
+/// SimpleXML input choice (for dropdown/radio/multiselect)
+public struct SimpleXMLInputChoice: Sendable {
+    public let value: String
+    public let label: String
+
+    public init(value: String, label: String? = nil) {
+        self.value = value
+        self.label = label ?? value
     }
 }
 

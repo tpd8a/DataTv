@@ -1,5 +1,6 @@
 import Foundation
 import CoreData
+import DashboardKit
 
 // MARK: - Notification Extensions
 
@@ -75,13 +76,14 @@ public class CoreDataManager {
     
     public func clearAllData() throws {
         let entityNames = [
+            // Legacy format entities
             "DashboardEntity",
-            "RowEntity", 
+            "RowEntity",
             "PanelEntity",
             "FieldsetEntity",
             "TokenEntity",
             "TokenChoiceEntity",
-            "TokenConditionEntity", 
+            "TokenConditionEntity",
             "TokenActionEntity",
             "SearchEntity",
             "VisualizationEntity",
@@ -89,7 +91,13 @@ public class CoreDataManager {
             "CustomContentEntity",
             "NamespaceEntity",
             "SearchExecutionEntity",
-            "SearchResultEntity"
+            "SearchResultEntity",
+            // Studio format entities (only those defined in d8aTvCore model)
+            "Dashboard",
+            "DataSource",
+            "Visualization",
+            "DashboardInput",
+            "DashboardLayout"
         ]
         
         for entityName in entityNames {
@@ -225,6 +233,19 @@ public class CoreDataManager {
     
     /// Find all searches in a dashboard by type and location
     public func findSearches(in dashboardId: String) -> SearchDiscoveryResult {
+        // Try new Dashboard Studio format first
+        let studioFetchRequest: NSFetchRequest<Dashboard> = Dashboard.fetchRequest()
+        studioFetchRequest.predicate = NSPredicate(
+            format: "dashboardId == %@ OR dashboardId ENDSWITH %@",
+            dashboardId, "§" + dashboardId
+        )
+
+        if let studioDashboard = try? context.fetch(studioFetchRequest).first {
+            print("📊 Found Dashboard Studio format for '\(dashboardId)'")
+            return extractSearchesFromStudioDashboard(studioDashboard, dashboardId: dashboardId)
+        }
+
+        // Fall back to old DashboardEntity format
         guard let dashboard = findDashboard(by: dashboardId) else {
             return SearchDiscoveryResult(
                 dashboardId: dashboardId,
@@ -234,12 +255,14 @@ public class CoreDataManager {
                 error: .dashboardNotFound(id: dashboardId)
             )
         }
-        
+
+        print("📄 Found legacy DashboardEntity format for '\(dashboardId)'")
+
         var panelSearches: [SearchInfo] = []
         var visualizationSearches: [SearchInfo] = []
         var globalSearches: [SearchInfo] = []
         var seenSearchIds = Set<String>()
-        
+
         // Collect visualization searches first (they are more specific)
         // This prioritizes visualization context over panel context for searches that appear in both
         for row in dashboard.rowsArray {
@@ -262,7 +285,7 @@ public class CoreDataManager {
                 }
             }
         }
-        
+
         // Collect panel searches (skip if already collected as visualization search)
         for row in dashboard.rowsArray {
             for panel in row.panelsArray {
@@ -282,7 +305,7 @@ public class CoreDataManager {
                 }
             }
         }
-        
+
         // Collect global searches
         for search in dashboard.globalSearchesArray {
             // Only add if we haven't seen this search ID before
@@ -298,11 +321,78 @@ public class CoreDataManager {
                 seenSearchIds.insert(search.id)
             }
         }
-        
+
         return SearchDiscoveryResult(
             dashboardId: dashboardId,
             panelSearches: panelSearches,
             visualizationSearches: visualizationSearches,
+            globalSearches: globalSearches,
+            error: nil
+        )
+    }
+
+    /// Extract searches from Dashboard Studio format
+    private func extractSearchesFromStudioDashboard(_ dashboard: Dashboard, dashboardId: String) -> SearchDiscoveryResult {
+        var globalSearches: [SearchInfo] = []
+        var seenSearchIds = Set<String>()
+
+        // Convert data sources to search info
+        guard let dataSourcesSet = dashboard.dataSources as? Set<DataSource> else {
+            print("⚠️ No data sources found in Studio dashboard")
+            return SearchDiscoveryResult(
+                dashboardId: dashboardId,
+                panelSearches: [],
+                visualizationSearches: [],
+                globalSearches: [],
+                error: nil
+            )
+        }
+
+        let dataSources = Array(dataSourcesSet).sorted { ($0.sourceId ?? "") < ($1.sourceId ?? "") }
+
+        print("📦 Found \(dataSources.count) data sources")
+
+        for dataSource in dataSources {
+            guard let sourceId = dataSource.sourceId else { continue }
+
+            // Skip if we've already seen this search
+            if seenSearchIds.contains(sourceId) {
+                continue
+            }
+
+            let query = dataSource.query ?? ""
+            let dsType = dataSource.type ?? "ds.search"
+
+            // For ds.chain, we need to resolve the base query
+            var fullQuery = query
+            if dsType == "ds.chain", let extendsId = dataSource.extendsId {
+                // Find the base data source
+                if let baseDataSource = dataSources.first(where: { $0.sourceId == extendsId }) {
+                    let baseQuery = baseDataSource.query ?? ""
+                    // Combine base query with extension
+                    fullQuery = baseQuery + " " + query
+                    print("🔗 Resolved chain: \(extendsId) -> \(sourceId)")
+                }
+            }
+
+            let searchInfo = SearchInfo(
+                id: sourceId,
+                query: fullQuery.isEmpty ? nil : fullQuery,
+                searchType: .global,
+                location: .dataSource(sourceId: sourceId, name: dataSource.name),
+                searchEntity: nil
+            )
+
+            globalSearches.append(searchInfo)
+            seenSearchIds.insert(sourceId)
+
+            print("  ✓ \(sourceId): \(dsType) - \(fullQuery.prefix(50))...")
+        }
+
+        return SearchDiscoveryResult(
+            dashboardId: dashboardId,
+            panelSearches: [],
+            visualizationSearches: [],
             globalSearches: globalSearches,
             error: nil
         )
@@ -319,6 +409,19 @@ public class CoreDataManager {
     
     /// Validate a search and check its dependencies
     public func validateSearch(_ searchInfo: SearchInfo, in dashboardId: String) -> SearchValidationResult {
+        // Try Dashboard Studio format first
+        let studioFetchRequest: NSFetchRequest<Dashboard> = Dashboard.fetchRequest()
+        studioFetchRequest.predicate = NSPredicate(
+            format: "dashboardId == %@ OR dashboardId ENDSWITH %@",
+            dashboardId, "§" + dashboardId
+        )
+
+        // Check for Studio format
+        if let studioDashboard = try? context.fetch(studioFetchRequest).first {
+            return validateStudioSearch(searchInfo, dashboard: studioDashboard)
+        }
+
+        // Fall back to legacy format
         guard let dashboard = findDashboard(by: dashboardId) else {
             return SearchValidationResult(
                 searchInfo: searchInfo,
@@ -328,13 +431,20 @@ public class CoreDataManager {
                 timeRange: nil
             )
         }
-        
+
         var issues: [SearchValidationIssue] = []
         var tokenReferences: [String] = []
         var timeRange: SearchTimeRange? = nil
-        
+
+        // Check if this is a saved search reference (ref attribute)
+        let hasSavedSearchRef = searchInfo.searchEntity?.ref != nil && !(searchInfo.searchEntity?.ref?.isEmpty ?? true)
+
         // Check if search has a query
-        guard let query = searchInfo.query, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        let queryText = searchInfo.query ?? ""
+        let hasQuery = !queryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+        // If no saved search reference and no query, that's an error
+        if !hasSavedSearchRef && !hasQuery {
             issues.append(.emptyQuery)
             return SearchValidationResult(
                 searchInfo: searchInfo,
@@ -344,21 +454,27 @@ public class CoreDataManager {
                 timeRange: timeRange
             )
         }
-        
-        // Extract token references from query
-        let extractedTokens = TokenValidator.extractTokenReferences(from: query)
-        tokenReferences = Array(extractedTokens)
-        
+
+        // Use the query text, or a space placeholder for saved searches with no query
+        // (the space prevents issues in later processing and will be replaced with | savedsearch)
+        let query = hasQuery ? queryText : " "
+
+        // Extract token references from query (only if we have an actual query)
+        if hasQuery {
+            let extractedTokens = TokenValidator.extractTokenReferences(from: query)
+            tokenReferences = Array(extractedTokens)
+        }
+
         // Validate tokens exist in dashboard
         let allTokens = dashboard.allTokens
         let availableTokenNames = Set(allTokens.map { $0.name })
-        
+
         for tokenRef in tokenReferences {
             if !availableTokenNames.contains(tokenRef) {
                 issues.append(.undefinedToken(tokenRef))
             }
         }
-        
+
         // Extract time range from search entity
         if let search = searchInfo.searchEntity {
             let earliest = search.earliestTime
@@ -367,7 +483,7 @@ public class CoreDataManager {
                 timeRange = SearchTimeRange(earliest: earliest, latest: latest)
             }
         }
-        
+
         // Check for search references (both 'base' and 'ref' attributes)
         if let search = searchInfo.searchEntity {
             let baseRef = search.base ?? search.ref
@@ -379,7 +495,82 @@ public class CoreDataManager {
                 }
             }
         }
-        
+
+        return SearchValidationResult(
+            searchInfo: searchInfo,
+            isValid: issues.isEmpty,
+            issues: issues,
+            tokenReferences: tokenReferences,
+            timeRange: timeRange
+        )
+    }
+
+    /// Validate a search for Dashboard Studio format
+    private func validateStudioSearch(_ searchInfo: SearchInfo, dashboard: Dashboard) -> SearchValidationResult {
+        var issues: [SearchValidationIssue] = []
+        var tokenReferences: [String] = []
+        var timeRange: SearchTimeRange? = nil
+
+        // Check if search has a query
+        let queryText = searchInfo.query ?? ""
+        let hasQuery = !queryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+        // If no query, that's an error
+        if !hasQuery {
+            issues.append(.emptyQuery)
+            return SearchValidationResult(
+                searchInfo: searchInfo,
+                isValid: false,
+                issues: issues,
+                tokenReferences: tokenReferences,
+                timeRange: timeRange
+            )
+        }
+
+        // Extract token references from query
+        let extractedTokens = TokenValidator.extractTokenReferences(from: queryText)
+        tokenReferences = Array(extractedTokens)
+
+        // Get available tokens from dashboard inputs
+        guard let inputsSet = dashboard.inputs as? Set<DashboardInput> else {
+            // No inputs defined - if we have token references, they're undefined
+            for tokenRef in tokenReferences {
+                issues.append(.undefinedToken(tokenRef))
+            }
+            return SearchValidationResult(
+                searchInfo: searchInfo,
+                isValid: issues.isEmpty,
+                issues: issues,
+                tokenReferences: tokenReferences,
+                timeRange: timeRange
+            )
+        }
+
+        let availableTokenNames = Set(inputsSet.compactMap { $0.token })
+
+        // Validate tokens exist in dashboard
+        for tokenRef in tokenReferences {
+            if !availableTokenNames.contains(tokenRef) {
+                issues.append(.undefinedToken(tokenRef))
+            }
+        }
+
+        // Extract time range from data source if this is a dataSource location
+        if case .dataSource(let sourceId, _) = searchInfo.location {
+            if let dataSourcesSet = dashboard.dataSources as? Set<DataSource>,
+               let dataSource = dataSourcesSet.first(where: { $0.sourceId == sourceId }),
+               let optionsJSON = dataSource.optionsJSON,
+               let optionsData = optionsJSON.data(using: .utf8),
+               let options = try? JSONDecoder().decode([String: AnyCodable].self, from: optionsData),
+               let queryParams = options["queryParameters"]?.value as? [String: String] {
+                let earliest = queryParams["earliest"]
+                let latest = queryParams["latest"]
+                if earliest != nil || latest != nil {
+                    timeRange = SearchTimeRange(earliest: earliest, latest: latest)
+                }
+            }
+        }
+
         return SearchValidationResult(
             searchInfo: searchInfo,
             isValid: issues.isEmpty,
@@ -391,10 +582,22 @@ public class CoreDataManager {
     
     /// Get all available token definitions for a dashboard
     public func getTokenDefinitions(for dashboardId: String) -> [SearchTokenDefinition] {
+        // Try Dashboard Studio format first
+        let studioFetchRequest: NSFetchRequest<Dashboard> = Dashboard.fetchRequest()
+        studioFetchRequest.predicate = NSPredicate(
+            format: "dashboardId == %@ OR dashboardId ENDSWITH %@",
+            dashboardId, "§" + dashboardId
+        )
+
+        if let studioDashboard = try? context.fetch(studioFetchRequest).first {
+            return getStudioTokenDefinitions(dashboard: studioDashboard)
+        }
+
+        // Fall back to legacy format
         guard let dashboard = findDashboard(by: dashboardId) else {
             return []
         }
-        
+
         return dashboard.allTokens.map { token in
             SearchTokenDefinition(
                 name: token.name,
@@ -407,6 +610,42 @@ public class CoreDataManager {
                 }
             )
         }
+    }
+
+    /// Get token definitions from Dashboard Studio format
+    private func getStudioTokenDefinitions(dashboard: Dashboard) -> [SearchTokenDefinition] {
+        guard let inputsSet = dashboard.inputs as? Set<DashboardInput> else {
+            return []
+        }
+
+        return inputsSet.compactMap { input -> SearchTokenDefinition? in
+            guard let token = input.token else { return nil }
+
+            // Parse choices from optionsJSON if available
+            var choices: [SearchTokenChoice] = []
+            if let optionsJSON = input.optionsJSON,
+               let optionsData = optionsJSON.data(using: .utf8),
+               let options = try? JSONDecoder().decode([String: AnyCodable].self, from: optionsData),
+               let items = options["items"]?.value as? [[String: Any]] {
+                choices = items.compactMap { item in
+                    guard let value = item["value"] as? String,
+                          let label = item["label"] as? String else {
+                        return nil
+                    }
+                    let isDefault = item["isDefault"] as? Bool ?? false
+                    return SearchTokenChoice(value: value, label: label, isDefault: isDefault)
+                }
+            }
+
+            return SearchTokenDefinition(
+                name: token,
+                type: input.type ?? "input.text",
+                label: input.title,
+                defaultValue: input.defaultValue,
+                required: false,  // Studio format doesn't have explicit required field
+                choices: choices
+            )
+        }.sorted { $0.name < $1.name }
     }
     
     // MARK: - Token Resolution
@@ -567,25 +806,43 @@ public class CoreDataManager {
         in dashboardId: String,
         userOverrides: SearchParameterOverrides = SearchParameterOverrides()
     ) -> SearchParametersResult {
-        
-        guard tokenResolution.isFullyResolved, 
+
+        guard tokenResolution.isFullyResolved,
               let resolvedQuery = tokenResolution.resolvedQuery else {
             return SearchParametersResult(
                 parameters: nil,
                 issues: [.tokenResolutionIncomplete]
             )
         }
-        
+
+        // Try Dashboard Studio format first
+        let studioFetchRequest: NSFetchRequest<Dashboard> = Dashboard.fetchRequest()
+        studioFetchRequest.predicate = NSPredicate(
+            format: "dashboardId == %@ OR dashboardId ENDSWITH %@",
+            dashboardId, "§" + dashboardId
+        )
+
+        if let studioDashboard = try? context.fetch(studioFetchRequest).first {
+            return buildStudioSearchParameters(
+                from: tokenResolution,
+                resolvedQuery: resolvedQuery,
+                dashboard: studioDashboard,
+                dashboardId: dashboardId,
+                userOverrides: userOverrides
+            )
+        }
+
+        // Fall back to legacy format
         guard let dashboard = findDashboard(by: dashboardId) else {
             return SearchParametersResult(
                 parameters: nil,
                 issues: [.dashboardNotFound]
             )
         }
-        
+
         let searchInfo = tokenResolution.searchInfo
         var issues: [SearchParameterIssue] = []
-        
+
         // Build base parameters
         var parameters = SearchParameters(
             query: resolvedQuery,
@@ -593,13 +850,72 @@ public class CoreDataManager {
             dashboardId: dashboardId,
             location: searchInfo.location
         )
-        
+
         // Apply settings with priority order
         applyTimeRange(to: &parameters, from: searchInfo, dashboard: dashboard, userOverrides: userOverrides)
         applyExecutionSettings(to: &parameters, from: searchInfo, dashboard: dashboard, userOverrides: userOverrides)
         applyResultSettings(to: &parameters, userOverrides: userOverrides, issues: &issues)
         applyDashboardContext(to: &parameters, from: dashboard, userOverrides: userOverrides)
-        
+
+        return SearchParametersResult(
+            parameters: parameters,
+            issues: issues.isEmpty ? nil : issues
+        )
+    }
+
+    /// Build search parameters for Dashboard Studio format
+    private func buildStudioSearchParameters(
+        from tokenResolution: TokenResolutionResult,
+        resolvedQuery: String,
+        dashboard: Dashboard,
+        dashboardId: String,
+        userOverrides: SearchParameterOverrides
+    ) -> SearchParametersResult {
+        let searchInfo = tokenResolution.searchInfo
+        var issues: [SearchParameterIssue] = []
+
+        // Build base parameters
+        var parameters = SearchParameters(
+            query: resolvedQuery,
+            searchId: searchInfo.id,
+            dashboardId: dashboardId,
+            location: searchInfo.location
+        )
+
+        // Get time range from data source if this is a dataSource location
+        var earliest: String? = nil
+        var latest: String? = nil
+
+        if case .dataSource(let sourceId, _) = searchInfo.location {
+            if let dataSourcesSet = dashboard.dataSources as? Set<DataSource>,
+               let dataSource = dataSourcesSet.first(where: { $0.sourceId == sourceId }),
+               let optionsJSON = dataSource.optionsJSON,
+               let optionsData = optionsJSON.data(using: .utf8),
+               let options = try? JSONDecoder().decode([String: AnyCodable].self, from: optionsData),
+               let queryParams = options["queryParameters"]?.value as? [String: String] {
+                earliest = queryParams["earliest"]
+                latest = queryParams["latest"]
+            }
+        }
+
+        // Apply time range with priority: user override > data source > defaults
+        parameters.earliestTime = userOverrides.earliestTime ?? earliest ?? "-24h@h"
+        parameters.latestTime = userOverrides.latestTime ?? latest ?? "now"
+
+        // Apply user overrides
+        if let maxCount = userOverrides.maxCount {
+            parameters.maxCount = maxCount
+        }
+        if let timeout = userOverrides.timeout {
+            parameters.timeout = timeout
+        } else {
+            parameters.timeout = 300  // Default timeout
+        }
+
+        parameters.searchMode = userOverrides.searchMode ?? "normal"
+        parameters.autostart = userOverrides.autostart ?? true
+        parameters.outputMode = "json"
+
         return SearchParametersResult(
             parameters: parameters,
             issues: issues.isEmpty ? nil : issues
@@ -903,35 +1219,127 @@ public class CoreDataManager {
                 return
             }
             
-            // Check if this search has a base search reference
-            // Check both 'base' and 'ref' properties (base is more common in Splunk dashboards)
+            // Check if this search has a base search reference or saved search reference
+            // 'base' = reference to another search in the dashboard (use | loadjob <SID>)
+            // 'ref' = reference to a Splunk saved search (use | savedsearch <name>)
             var baseSearchSID: String?
+            var savedSearchRef: String?
             var effectiveTimeRange = timeRange
-            
-            let baseRef = searchInfo.searchEntity?.base ?? searchInfo.searchEntity?.ref
-            
-            if let baseRef = baseRef, !baseRef.isEmpty {
+
+            // Check for base search reference first (dashboard search reference)
+            if let base = searchInfo.searchEntity?.base, !base.isEmpty {
                 await MainActor.run {
-                    updateExecutionProgress(executionId: executionId, status: .running, progress: 0.15, message: "Resolving base search reference: \(baseRef)...")
+                    updateExecutionProgress(executionId: executionId, status: .running, progress: 0.15, message: "Resolving base search reference: \(base)...")
                 }
-                
+
                 // Try to get the SID for the base search
-                if let sid = await MainActor.run(body: { getSearchSID(searchId: baseRef, in: dashboardId) }) {
+                if let sid = await MainActor.run(body: { getSearchSID(searchId: base, in: dashboardId) }) {
                     baseSearchSID = sid
                     // When using base search, typically no time range is needed
                     effectiveTimeRange = nil
-                    print("✅ Resolved base search '\(baseRef)' to SID: \(sid)")
+                    print("✅ Resolved base search '\(base)' to SID: \(sid)")
                 } else {
+                    // Base search not yet executed - execute it first (recursive execution)
                     await MainActor.run {
                         updateExecutionProgress(
                             executionId: executionId,
-                            status: .failed,
-                            progress: 0.0,
-                            message: "Base search '\(baseRef)' not found or not yet executed. Please run the base search first."
+                            status: .running,
+                            progress: 0.12,
+                            message: "Base search '\(base)' not yet executed - executing it first..."
                         )
                     }
-                    return
+
+                    print("🔄 Base search '\(base)' not found - executing recursively...")
+
+                    // Execute base search first (using same parameters)
+                    let baseExecutionId = await MainActor.run {
+                        startSearchExecution(
+                            searchId: base,
+                            in: dashboardId,
+                            userTokenValues: userTokenValues,
+                            timeRange: timeRange,
+                            parameterOverrides: parameterOverrides,
+                            splunkCredentials: splunkCredentials
+                        )
+                    }
+
+                    // Wait for base search to complete
+                    var baseCompleted = false
+                    var waitAttempts = 0
+                    let maxWaitAttempts = 300 // 5 minutes (300 * 1 second)
+
+                    while !baseCompleted && waitAttempts < maxWaitAttempts {
+                        try? await Task.sleep(for: .seconds(1))
+                        waitAttempts += 1
+
+                        if let baseStatus = await MainActor.run(body: { getSearchExecutionStatus(executionId: baseExecutionId) }) {
+                            let status = SearchExecutionStatus(rawValue: baseStatus.status ?? "") ?? .pending
+
+                            if status == .completed {
+                                baseCompleted = true
+                                if let sid = baseStatus.jobId {
+                                    baseSearchSID = sid
+                                    effectiveTimeRange = nil
+                                    print("✅ Base search '\(base)' completed with SID: \(sid)")
+                                }
+                            } else if status == .failed || status == .cancelled {
+                                await MainActor.run {
+                                    updateExecutionProgress(
+                                        executionId: executionId,
+                                        status: .failed,
+                                        progress: 0.0,
+                                        message: "Base search '\(base)' failed: \(baseStatus.errorMessage ?? "Unknown error")"
+                                    )
+                                }
+                                return
+                            }
+
+                            // Update progress while waiting
+                            if waitAttempts % 5 == 0 {
+                                let baseProgress = baseStatus.progress
+                                await MainActor.run {
+                                    updateExecutionProgress(
+                                        executionId: executionId,
+                                        status: .running,
+                                        progress: 0.12 + (baseProgress * 0.03), // Scale base search progress to 12-15%
+                                        message: "Waiting for base search '\(base)' (\(Int(baseProgress * 100))%)..."
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if !baseCompleted {
+                        await MainActor.run {
+                            updateExecutionProgress(
+                                executionId: executionId,
+                                status: .failed,
+                                progress: 0.0,
+                                message: "Timeout waiting for base search '\(base)' to complete"
+                            )
+                        }
+                        return
+                    }
+
+                    if baseSearchSID == nil {
+                        await MainActor.run {
+                            updateExecutionProgress(
+                                executionId: executionId,
+                                status: .failed,
+                                progress: 0.0,
+                                message: "Base search '\(base)' completed but no SID available"
+                            )
+                        }
+                        return
+                    }
                 }
+            } else if let ref = searchInfo.searchEntity?.ref, !ref.isEmpty {
+                // Handle saved search reference - no SID lookup needed
+                savedSearchRef = ref
+                await MainActor.run {
+                    updateExecutionProgress(executionId: executionId, status: .running, progress: 0.15, message: "Using saved search: \(ref)...")
+                }
+                print("📋 Using saved search reference: '\(ref)'")
             }
             
             await MainActor.run {
@@ -978,26 +1386,55 @@ public class CoreDataManager {
                 return
             }
             
-            // If we have a base search SID, prepend the query with | loadjob
+            // Modify query based on reference type
             if let sid = baseSearchSID {
+                // Base search reference: prepend the query with | loadjob <SID>
                 // First, strip any "search " prefix from the original query since we're making it a pipe command
                 var cleanQuery = searchParameters.query
                 if cleanQuery.lowercased().hasPrefix("search ") {
                     cleanQuery = String(cleanQuery.dropFirst(7)).trimmingCharacters(in: .whitespaces)
                 }
-                
+
                 // If the cleaned query starts with |, remove it (we'll add | loadjob)
                 if cleanQuery.hasPrefix("|") {
                     cleanQuery = cleanQuery.dropFirst().trimmingCharacters(in: .whitespaces)
                 }
-                
+
                 // Now prepend with | loadjob
                 searchParameters.query = "| loadjob \(sid) | \(cleanQuery)"
-                
+
                 // Remove time range parameters when using base search
                 searchParameters.earliestTime = nil
                 searchParameters.latestTime = nil
                 print("🔗 Modified query for base search: \(searchParameters.query)")
+            } else if let savedSearch = savedSearchRef {
+                // Saved search reference: prepend the query with | savedsearch <name>
+                // This must be prepended BEFORE any "search " term
+                var cleanQuery = searchParameters.query
+
+                // Strip any "search " prefix from the original query
+                if cleanQuery.lowercased().hasPrefix("search ") {
+                    cleanQuery = String(cleanQuery.dropFirst(7)).trimmingCharacters(in: .whitespaces)
+                }
+
+                // If the cleaned query starts with |, remove the leading pipe
+                if cleanQuery.hasPrefix("|") {
+                    cleanQuery = cleanQuery.dropFirst().trimmingCharacters(in: .whitespaces)
+                }
+
+                // Prepend with | savedsearch <name>
+                if cleanQuery.isEmpty {
+                    // No additional query, just the saved search
+                    searchParameters.query = "| savedsearch \(savedSearch)"
+                } else if cleanQuery.hasPrefix("|") {
+                    // Query already starts with pipe command
+                    searchParameters.query = "| savedsearch \(savedSearch) \(cleanQuery)"
+                } else {
+                    // Regular query text - add pipe separator
+                    searchParameters.query = "| savedsearch \(savedSearch) | \(cleanQuery)"
+                }
+
+                print("📋 Modified query for saved search: \(searchParameters.query)")
             }
             
             await MainActor.run {
@@ -1531,7 +1968,8 @@ public enum SearchLocation: Sendable {
     case panel(panelId: String, rowId: String)
     case visualization(vizId: String, panelId: String, rowId: String)
     case global
-    
+    case dataSource(sourceId: String, name: String?)
+
     public var description: String {
         switch self {
         case .panel(let panelId, let rowId):
@@ -1540,6 +1978,12 @@ public enum SearchLocation: Sendable {
             return "Visualization '\(vizId)' in panel '\(panelId)' in row '\(rowId)'"
         case .global:
             return "Global search"
+        case .dataSource(let sourceId, let name):
+            if let name = name {
+                return "Data Source '\(sourceId)' (\(name))"
+            } else {
+                return "Data Source '\(sourceId)'"
+            }
         }
     }
 }

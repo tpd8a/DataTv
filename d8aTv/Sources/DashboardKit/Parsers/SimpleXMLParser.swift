@@ -1,14 +1,14 @@
 import Foundation
 
 /// Parser for Splunk SimpleXML dashboard format (legacy)
-public actor SimpleXMLParser: NSObject, XMLParserDelegate {
+public class SimpleXMLParser: NSObject, XMLParserDelegate {
     private var currentElement = ""
     private var currentAttributes: [String: String] = [:]
     private var elementStack: [String] = []
 
     // Dashboard components being built
     private var label = ""
-    private var description: String?
+    private var dashboardDescription: String?
     private var rows: [SimpleXMLRow] = []
     private var fieldsets: [SimpleXMLFieldset] = []
 
@@ -35,7 +35,7 @@ public actor SimpleXMLParser: NSObject, XMLParserDelegate {
     public func parse(_ xmlData: Data) throws -> SimpleXMLConfiguration {
         // Reset state
         label = ""
-        description = nil
+        dashboardDescription = nil
         rows = []
         fieldsets = []
         currentRow = []
@@ -46,7 +46,7 @@ public actor SimpleXMLParser: NSObject, XMLParserDelegate {
         currentOptions = [:]
         elementStack = []
 
-        let parser = XMLParser(data: xmlData)
+        let parser = Foundation.XMLParser(data: xmlData)
         parser.delegate = self
         parser.shouldProcessNamespaces = false
         parser.shouldReportNamespacePrefixes = false
@@ -58,7 +58,7 @@ public actor SimpleXMLParser: NSObject, XMLParserDelegate {
 
         return SimpleXMLConfiguration(
             label: label,
-            description: description,
+            description: dashboardDescription,
             rows: rows,
             fieldsets: fieldsets.isEmpty ? nil : fieldsets
         )
@@ -66,33 +66,27 @@ public actor SimpleXMLParser: NSObject, XMLParserDelegate {
 
     // MARK: - XMLParserDelegate
 
-    nonisolated public func parser(
+    public func parser(
         _ parser: XMLParser,
         didStartElement elementName: String,
         namespaceURI: String?,
         qualifiedName qName: String?,
         attributes attributeDict: [String: String] = [:]
     ) {
-        Task { @MainActor in
-            await handleStartElement(elementName, attributes: attributeDict)
-        }
+        handleStartElement(elementName, attributes: attributeDict)
     }
 
-    nonisolated public func parser(_ parser: XMLParser, foundCharacters string: String) {
-        Task { @MainActor in
-            await handleFoundCharacters(string)
-        }
+    public func parser(_ parser: XMLParser, foundCharacters string: String) {
+        handleFoundCharacters(string)
     }
 
-    nonisolated public func parser(
+    public func parser(
         _ parser: XMLParser,
         didEndElement elementName: String,
         namespaceURI: String?,
         qualifiedName qName: String?
     ) {
-        Task { @MainActor in
-            await handleEndElement(elementName)
-        }
+        handleEndElement(elementName)
     }
 
     // MARK: - Element Handlers
@@ -139,7 +133,7 @@ public actor SimpleXMLParser: NSObject, XMLParserDelegate {
 
         case "description":
             if elementStack.count == 2 { // Top-level description
-                description = currentCharacters
+                dashboardDescription = currentCharacters
             }
 
         case "query":

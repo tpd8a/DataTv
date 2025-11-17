@@ -95,19 +95,25 @@ public struct DataSourceOptions: Codable, Sendable {
     public let refresh: String?
     public let refreshType: String?
     public let enableSmartSources: Bool?
+    public let extend: String?  // For ds.chain type - references base data source
+    public let ref: String?     // For ds.savedSearch type - references saved search
 
     public init(
         query: String? = nil,
         queryParameters: QueryParameters? = nil,
         refresh: String? = nil,
         refreshType: String? = nil,
-        enableSmartSources: Bool? = nil
+        enableSmartSources: Bool? = nil,
+        extend: String? = nil,
+        ref: String? = nil
     ) {
         self.query = query
         self.queryParameters = queryParameters
         self.refresh = refresh
         self.refreshType = refreshType
         self.enableSmartSources = enableSmartSources
+        self.extend = extend
+        self.ref = ref
     }
 }
 
@@ -124,21 +130,62 @@ public struct QueryParameters: Codable, Sendable {
 
 /// Layout definition
 public struct LayoutDefinition: Codable, Sendable {
-    public let type: LayoutType
+    public let type: LayoutType?  // Optional for native Studio format
     public let options: [String: AnyCodable]?
-    public let structure: [LayoutStructureItem]
+    public let structure: [LayoutStructureItem]?  // For converted SimpleXML
     public let globalInputs: [String]?
 
+    // Native Dashboard Studio format fields
+    public let tabs: LayoutTabs?
+    public let layoutDefinitions: [String: SubLayoutDefinition]?
+
     public init(
-        type: LayoutType,
+        type: LayoutType? = nil,
         options: [String: AnyCodable]? = nil,
-        structure: [LayoutStructureItem],
-        globalInputs: [String]? = nil
+        structure: [LayoutStructureItem]? = nil,
+        globalInputs: [String]? = nil,
+        tabs: LayoutTabs? = nil,
+        layoutDefinitions: [String: SubLayoutDefinition]? = nil
     ) {
         self.type = type
         self.options = options
         self.structure = structure
         self.globalInputs = globalInputs
+        self.tabs = tabs
+        self.layoutDefinitions = layoutDefinitions
+    }
+}
+
+/// Layout tabs structure (Dashboard Studio)
+public struct LayoutTabs: Codable, Sendable {
+    public let items: [LayoutTabItem]
+
+    public init(items: [LayoutTabItem]) {
+        self.items = items
+    }
+}
+
+/// Layout tab item
+public struct LayoutTabItem: Codable, Sendable {
+    public let layoutId: String
+    public let label: String
+
+    public init(layoutId: String, label: String) {
+        self.layoutId = layoutId
+        self.label = label
+    }
+}
+
+/// Sub-layout definition for Dashboard Studio tabs
+public struct SubLayoutDefinition: Codable, Sendable {
+    public let type: LayoutType
+    public let structure: [LayoutStructureItem]
+    public let options: [String: AnyCodable]?
+
+    public init(type: LayoutType, structure: [LayoutStructureItem], options: [String: AnyCodable]? = nil) {
+        self.type = type
+        self.structure = structure
+        self.options = options
     }
 }
 
@@ -247,7 +294,7 @@ public struct DefaultsDefinition: Codable, Sendable {
 }
 
 /// Type-erased codable wrapper for any value
-public struct AnyCodable: Codable, Sendable {
+public struct AnyCodable: Codable, @unchecked Sendable {
     public let value: Any
 
     public init(_ value: Any) {
@@ -291,6 +338,9 @@ public struct AnyCodable: Codable, Sendable {
             try container.encode(string)
         case let array as [Any]:
             try container.encode(array.map { AnyCodable($0) })
+        case let dictionary as [String: String]:
+            // Handle [String: String] dictionaries (e.g., from color maps)
+            try container.encode(dictionary)
         case let dictionary as [String: Any]:
             try container.encode(dictionary.mapValues { AnyCodable($0) })
         default:
@@ -298,7 +348,7 @@ public struct AnyCodable: Codable, Sendable {
                 value,
                 EncodingError.Context(
                     codingPath: container.codingPath,
-                    debugDescription: "Unsupported type"
+                    debugDescription: "Unsupported type: \(type(of: value))"
                 )
             )
         }

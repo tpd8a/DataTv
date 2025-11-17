@@ -76,7 +76,7 @@ public enum SearchStatus: String, Codable, Sendable {
 }
 
 /// Individual search result row
-public struct SearchResultRow: Sendable {
+public struct SearchResultRow: @unchecked Sendable {
     public let fields: [String: Any]
     public let timestamp: Date
 
