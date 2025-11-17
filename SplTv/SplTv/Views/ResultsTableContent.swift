@@ -351,8 +351,40 @@ struct ResultsTableContent: View {
     }
 
     private func loadVisualizationOptions() {
-        // TODO: Load from Dashboard → DataSource → Visualization
-        // For now, use defaults
+        // Load from DataSource → Visualization relationship
+        guard let dataSource = execution.dataSource else {
+            print("⚠️ No dataSource relationship found for execution")
+            setDefaultVisualizationOptions()
+            return
+        }
+
+        // Find table visualization for this dataSource
+        if let tableViz = Visualization.tableVisualization(forDataSource: dataSource, in: viewContext) {
+            print("✅ Found table visualization: \(tableViz.vizId ?? "unknown")")
+
+            // Create formatting helper
+            let formatting = VisualizationFormatting(dashboardKitVisualization: tableViz)
+            vizFormatting = formatting
+
+            // Apply table display options
+            wrapResults = formatting.wrapText
+            showRowNumbers = formatting.showRowNumbers
+            displayRowCount = formatting.tableRowCount
+
+            // Cache fields with formatting
+            fieldsWithNumberFormat = Set(formatting.formats(ofType: "number").compactMap { $0["field"] as? String })
+            fieldsWithColorFormat = Set(formatting.formats(ofType: "color").compactMap { $0["field"] as? String })
+
+            print("📊 Table options loaded: wrap=\(wrapResults), rowNumbers=\(showRowNumbers), count=\(displayRowCount)")
+            print("📊 Fields with number format: \(fieldsWithNumberFormat)")
+            print("📊 Fields with color format: \(fieldsWithColorFormat)")
+        } else {
+            print("⚠️ No table visualization found for dataSource, using defaults")
+            setDefaultVisualizationOptions()
+        }
+    }
+
+    private func setDefaultVisualizationOptions() {
         wrapResults = false
         showRowNumbers = true
         displayRowCount = 100

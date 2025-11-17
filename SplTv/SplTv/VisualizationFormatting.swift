@@ -41,14 +41,21 @@ import DashboardKit
 /// }
 /// ```
 public struct VisualizationFormatting {
-    
-    let visualization: VisualizationEntity
-    
+
+    // Support both old and new visualization types during migration
+    private enum VisualizationType {
+        case legacy(VisualizationEntity)
+        case dashboardKit(Visualization)
+    }
+
+    private let vizType: VisualizationType
+
+    // Legacy initializer for VisualizationEntity (d8aTvCore)
     public init(visualization: VisualizationEntity) {
-        self.visualization = visualization
-        
+        self.vizType = .legacy(visualization)
+
         #if DEBUG
-        print("🔧 VisualizationFormatting init - allOptions keys: \(visualization.allOptions.keys.sorted())")
+        print("🔧 VisualizationFormatting init (legacy) - allOptions keys: \(visualization.allOptions.keys.sorted())")
         if let options = visualization.allOptions["options"] as? [String: String] {
             print("🔧 Options dict has \(options.count) entries")
             if let splunkDefault = options["SplunkDefault"] {
@@ -66,20 +73,54 @@ public struct VisualizationFormatting {
         }
         #endif
     }
+
+    // New initializer for Visualization (DashboardKit)
+    public init(dashboardKitVisualization: Visualization) {
+        self.vizType = .dashboardKit(dashboardKitVisualization)
+
+        #if DEBUG
+        print("🔧 VisualizationFormatting init (DashboardKit) - allOptions keys: \(dashboardKitVisualization.allOptions.keys.sorted())")
+        if let options = dashboardKitVisualization.allOptions["options"] as? [String: String] {
+            print("🔧 Options dict has \(options.count) entries")
+            if let splunkDefault = options["SplunkDefault"] {
+                print("🔧 ✅ SplunkDefault = '\(splunkDefault)'")
+            } else {
+                print("🔧 ❌ No SplunkDefault key in options")
+            }
+        } else {
+            print("🔧 ❌ No 'options' dict in allOptions")
+        }
+        if let formats = dashboardKitVisualization.allOptions["formats"] as? [[String: Any]] {
+            print("🔧 Formats array has \(formats.count) entries")
+        } else {
+            print("🔧 ❌ No 'formats' array in allOptions")
+        }
+        #endif
+    }
+
+    // Get allOptions regardless of entity type
+    private var allOptionsDict: [String: Any] {
+        switch vizType {
+        case .legacy(let viz):
+            return viz.allOptions
+        case .dashboardKit(let viz):
+            return viz.allOptions
+        }
+    }
     
     // MARK: - Options Access
-    
+
     /// Get all options
     public var options: [String: String] {
-        guard let allOptions = visualization.allOptions["options"] as? [String: String] else {
+        guard let allOptions = allOptionsDict["options"] as? [String: String] else {
             return [:]
         }
         return allOptions
     }
-    
+
     /// Get all format configurations
     public var formats: [[String: Any]] {
-        guard let formatsArray = visualization.allOptions["formats"] as? [[String: Any]] else {
+        guard let formatsArray = allOptionsDict["formats"] as? [[String: Any]] else {
             return []
         }
         return formatsArray
