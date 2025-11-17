@@ -4,7 +4,7 @@ import DashboardKit
 
 /// Manages playback and navigation through search execution timeline
 struct ExecutionTimelineView: View {
-    let executions: [SearchExecutionEntity]
+    let executions: [SearchExecution]
     @Binding var currentIndex: Int
     @Binding var isPlaying: Bool
     let onRefresh: () -> Void
@@ -112,16 +112,19 @@ struct ExecutionTimelineView: View {
             if let currentExecution = executions[safe: currentIndex] {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(currentExecution.startTime, formatter: dateTimeFormatter)
-                            .font(.caption2)
-                            .fontWeight(.semibold)
+                        if let startTime = currentExecution.startTime {
+                            Text(startTime, formatter: dateTimeFormatter)
+                                .font(.caption2)
+                                .fontWeight(.semibold)
+                        }
 
                         executionStatusBadge(currentExecution)
                     }
 
                     Spacer()
 
-                    if let resultCount = currentExecution.resultCount {
+                    let resultCount = currentExecution.resultCount
+                    if resultCount > 0 {
                         Text("\(resultCount) result(s)")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
@@ -133,7 +136,7 @@ struct ExecutionTimelineView: View {
 
     // MARK: - Status Badge
 
-    private func executionStatusBadge(_ execution: SearchExecutionEntity) -> some View {
+    private func executionStatusBadge(_ execution: SearchExecution) -> some View {
         Text(executionStatusText(execution))
             .font(.caption2)
             .padding(.horizontal, 6)
@@ -161,17 +164,17 @@ struct ExecutionTimelineView: View {
 
     // MARK: - Helper Methods
 
-    private func executionStatusText(_ execution: SearchExecutionEntity) -> String {
-        switch execution.executionStatus {
+    private func executionStatusText(_ execution: SearchExecution) -> String {
+        switch execution.status {
         case "completed": return "Completed"
         case "running": return "Running"
         case "failed": return "Failed"
-        default: return execution.executionStatus ?? "Unknown"
+        default: return execution.status ?? "Unknown"
         }
     }
 
-    private func executionStatusColor(_ execution: SearchExecutionEntity) -> Color {
-        switch execution.executionStatus {
+    private func executionStatusColor(_ execution: SearchExecution) -> Color {
+        switch execution.status {
         case "completed": return .green
         case "running": return .blue
         case "failed": return .red

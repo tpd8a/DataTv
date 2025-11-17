@@ -5,8 +5,8 @@ import DashboardKit
 /// Main coordinator for displaying search results in a table format
 /// Handles loading, change detection, sorting, and rendering
 struct ResultsTableContent: View {
-    let execution: SearchExecutionEntity
-    let previousExecution: SearchExecutionEntity?
+    let execution: SearchExecution
+    let previousExecution: SearchExecution?
     let showChanges: Bool
 
     @ObservedObject private var settings = DashboardMonitorSettings.shared
@@ -291,39 +291,60 @@ struct ResultsTableContent: View {
     private func loadResults() {
         isLoading = true
 
-        print("🔄 Loading results for execution: \(execution.id ?? "unknown")")
+        print("🔄 Loading results for execution: \(execution.id?.uuidString ?? "unknown")")
 
         // Load visualization options from dashboard
         loadVisualizationOptions()
 
-        // Parse results from execution
-        if let resultsData = execution.results {
-            do {
-                if let json = try JSONSerialization.jsonObject(with: resultsData, options: []) as? [String: Any],
-                   let rows = json["results"] as? [[String: Any]] {
-                    results = rows
-                    fields = extractFields(from: rows)
-                    print("✅ Loaded \(rows.count) results with \(fields.count) fields")
+        // Parse results from SearchResult entities
+        if let resultsSet = execution.results as? Set<SearchResult> {
+            let sortedResults = resultsSet.sorted { $0.rowIndex < $1.rowIndex }
+            var parsedRows: [[String: Any]] = []
+
+            for result in sortedResults {
+                if let jsonString = result.resultJSON,
+                   let jsonData = jsonString.data(using: .utf8) {
+                    do {
+                        if let row = try JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: Any] {
+                            parsedRows.append(row)
+                        }
+                    } catch {
+                        print("❌ Failed to parse result row \(result.rowIndex): \(error)")
+                    }
                 }
-            } catch {
-                print("❌ Failed to parse results: \(error)")
-                results = []
-                fields = []
             }
+
+            results = parsedRows
+            fields = extractFields(from: parsedRows)
+            print("✅ Loaded \(parsedRows.count) results with \(fields.count) fields")
+        } else {
+            results = []
+            fields = []
         }
 
         // Load previous results for change detection
-        if showChanges, let prevExecution = previousExecution, let prevData = prevExecution.results {
-            do {
-                if let json = try JSONSerialization.jsonObject(with: prevData, options: []) as? [String: Any],
-                   let rows = json["results"] as? [[String: Any]] {
-                    previousResults = rows
-                    print("✅ Loaded \(rows.count) previous results for comparison")
+        if showChanges, let prevExecution = previousExecution,
+           let prevResultsSet = prevExecution.results as? Set<SearchResult> {
+            let sortedPrevResults = prevResultsSet.sorted { $0.rowIndex < $1.rowIndex }
+            var parsedPrevRows: [[String: Any]] = []
+
+            for result in sortedPrevResults {
+                if let jsonString = result.resultJSON,
+                   let jsonData = jsonString.data(using: .utf8) {
+                    do {
+                        if let row = try JSONSerialization.jsonObject(with: jsonData, options: []) as? [String: Any] {
+                            parsedPrevRows.append(row)
+                        }
+                    } catch {
+                        print("❌ Failed to parse previous result row \(result.rowIndex): \(error)")
+                    }
                 }
-            } catch {
-                print("❌ Failed to parse previous results: \(error)")
-                previousResults = []
             }
+
+            previousResults = parsedPrevRows
+            print("✅ Loaded \(parsedPrevRows.count) previous results for comparison")
+        } else {
+            previousResults = []
         }
 
         isLoading = false

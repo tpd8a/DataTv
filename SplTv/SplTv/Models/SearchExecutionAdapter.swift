@@ -2,8 +2,7 @@ import Foundation
 import DashboardKit
 
 /// Adapter that bridges DashboardKit's SearchExecution to the interface expected by UI
-/// NOTE: This is a compatibility layer. The old code uses SearchExecutionEntity from d8aTvCore,
-/// but we're transitioning to SearchExecution from DashboardKit.
+/// This provides a clean API layer between CoreData entities and SwiftUI views.
 public struct SearchExecutionAdapter: Identifiable {
     public let id: UUID
     public let searchExecution: SearchExecution

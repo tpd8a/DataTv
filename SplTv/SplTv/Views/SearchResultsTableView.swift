@@ -4,11 +4,11 @@ import DashboardKit
 
 /// Displays search execution results with timeline playback
 struct SearchResultsTableView: View {
-    let dashboardId: String
-    let searchId: String
+    let dashboardId: UUID
+    let dataSourceId: UUID
 
     @Environment(\.managedObjectContext) private var viewContext
-    @State private var executions: [SearchExecutionEntity] = []
+    @State private var executions: [SearchExecution] = []
     @State private var currentExecutionIndex: Int = 0
     @State private var isPlaying = false
     @State private var playbackTimer: Timer?
@@ -84,16 +84,16 @@ struct SearchResultsTableView: View {
     // MARK: - Data Loading
 
     private func loadExecutions() {
-        let request: NSFetchRequest<SearchExecutionEntity> = SearchExecutionEntity.fetchRequest()
+        let request: NSFetchRequest<SearchExecution> = SearchExecution.fetchRequest()
         request.predicate = NSPredicate(
-            format: "dashboardId == %@ AND searchId == %@",
-            dashboardId, searchId
+            format: "dataSource.id == %@",
+            dataSourceId as CVarArg
         )
-        request.sortDescriptors = [NSSortDescriptor(keyPath: \SearchExecutionEntity.startTime, ascending: false)]
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \SearchExecution.startTime, ascending: false)]
 
         do {
             executions = try viewContext.fetch(request)
-            print("📊 Loaded \(executions.count) execution(s) for search '\(searchId)'")
+            print("📊 Loaded \(executions.count) execution(s) for dataSource '\(dataSourceId)'")
 
             if !executions.isEmpty && currentExecutionIndex >= executions.count {
                 currentExecutionIndex = 0
@@ -146,10 +146,8 @@ struct SearchResultsTableView: View {
             queue: .main
         ) { notification in
             guard let userInfo = notification.userInfo,
-                  let notificationDashboardId = userInfo["dashboardId"] as? String,
-                  let notificationSearchId = userInfo["searchId"] as? String,
-                  notificationDashboardId == dashboardId,
-                  notificationSearchId == searchId else {
+                  let notificationDataSourceId = userInfo["dataSourceId"] as? UUID,
+                  notificationDataSourceId == dataSourceId else {
                 return
             }
 
