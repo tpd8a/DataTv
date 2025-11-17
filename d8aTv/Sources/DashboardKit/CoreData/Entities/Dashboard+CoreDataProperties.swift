@@ -8,6 +8,7 @@ extension Dashboard {
     }
 
     @NSManaged public var id: UUID?
+    @NSManaged public var dashboardId: String?
     @NSManaged public var title: String?
     @NSManaged public var dashboardDescription: String?
     @NSManaged public var formatType: String?
