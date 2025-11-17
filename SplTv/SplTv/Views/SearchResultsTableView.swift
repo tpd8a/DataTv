@@ -175,33 +175,3 @@ struct SearchResultsTableView: View {
 extension Notification.Name {
     static let searchExecutionCompleted = Notification.Name("searchExecutionCompleted")
 }
-
-// MARK: - Placeholder for ResultsTableContent
-
-/// Placeholder for the actual results table content
-/// TODO: This will be implemented in the next step with proper cell formatting
-struct ResultsTableContent: View {
-    let execution: SearchExecutionEntity
-    let previousExecution: SearchExecutionEntity?
-    let showChanges: Bool
-
-    var body: some View {
-        VStack {
-            Text("Results table placeholder")
-                .font(.headline)
-
-            Text("Execution: \(execution.id ?? "unknown")")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            if let resultCount = execution.resultCount {
-                Text("\(resultCount) results")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.gray.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-    }
-}
