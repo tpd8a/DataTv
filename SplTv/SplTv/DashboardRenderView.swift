@@ -1,6 +1,7 @@
 import SwiftUI
 import CoreData
 import DashboardKit
+import d8aTvCore  // Legacy entity support (DashboardEntity, RowEntity, PanelEntity, CoreDataTokenType)
 
 #if os(macOS) || os(tvOS)
 

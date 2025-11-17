@@ -4,7 +4,8 @@ import DashboardKit
 /// Displays a single search/data source row with timer and status information
 struct SearchRowView: View {
     let adapter: DataSourceAdapter
-    let timerInfo: SearchTimerInfo?
+    // Note: DashboardRefreshWorker not yet migrated - timer info disabled
+    // let timerInfo: SearchTimerInfo?
     var isSelected: Bool = false
     var onSelect: (() -> Void)? = nil
 
@@ -16,12 +17,13 @@ struct SearchRowView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     headerSection
 
-                    if let timer = timerInfo {
-                        Divider()
-                        timerInfoSection(timer)
-                    } else {
-                        noTimerSection
-                    }
+                    // Timer info disabled until DashboardRefreshWorker migrated
+                    // if let timer = timerInfo {
+                    //     Divider()
+                    //     timerInfoSection(timer)
+                    // } else {
+                    noTimerSection
+                    // }
 
                     if let query = adapter.query, !query.isEmpty {
                         Divider()
@@ -78,11 +80,13 @@ struct SearchRowView: View {
 
     private var statusBadges: some View {
         HStack(spacing: 6) {
-            if timerInfo != nil {
-                Image(systemName: "timer")
-                    .foregroundStyle(.green)
-                    .help("Has active refresh timer")
-            } else if let refresh = adapter.refresh, !refresh.isEmpty {
+            // Timer info disabled until DashboardRefreshWorker migrated
+            // if timerInfo != nil {
+            //     Image(systemName: "timer")
+            //         .foregroundStyle(.green)
+            //         .help("Has active refresh timer")
+            // } else
+            if let refresh = adapter.refresh, !refresh.isEmpty {
                 Image(systemName: "timer.circle")
                     .foregroundStyle(.orange)
                     .help("Has refresh interval but timer not active")
@@ -96,7 +100,8 @@ struct SearchRowView: View {
     }
 
     // MARK: - Timer Info Section
-
+    // Disabled until DashboardRefreshWorker migrated - SearchTimerInfo type removed
+    /*
     private func timerInfoSection(_ timer: SearchTimerInfo) -> some View {
         VStack(spacing: 4) {
             HStack {
@@ -126,6 +131,7 @@ struct SearchRowView: View {
             .foregroundStyle(.secondary)
         }
     }
+    */
 
     // MARK: - No Timer Section
 
