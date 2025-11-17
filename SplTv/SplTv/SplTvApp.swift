@@ -797,40 +797,14 @@ struct SettingsView: View {
     }
     
     private func calculateCoreDataSize() {
-        let coreDataManager = CoreDataManager.shared
-        guard let storeURL = coreDataManager.persistentContainer.persistentStoreCoordinator.persistentStores.first?.url else {
-            coreDataSize = "Unable to determine size"
-            return
-        }
-        
-        do {
-            let attributes = try FileManager.default.attributesOfItem(atPath: storeURL.path)
-            if let fileSize = attributes[FileAttributeKey.size] as? UInt64 {
-                let formatter = ByteCountFormatter()
-                formatter.countStyle = .file
-                coreDataSize = formatter.string(fromByteCount: Int64(fileSize))
-            } else {
-                coreDataSize = "Unknown size"
-            }
-        } catch {
-            coreDataSize = "Error: \(error.localizedDescription)"
-        }
+        // TODO: Add public API to DashboardManager to get store size
+        coreDataSize = "Size calculation not available"
     }
-    
+
     private func clearAllCoreData() {
-        do {
-            try CoreDataManager.shared.clearAllData()
-            
-            // Update UI
-            updateDashboardCount()
-            calculateCoreDataSize()
-            
-            // Show success message
-            connectionTestResult = .success(message: "All data cleared successfully")
-        } catch {
-            print("❌ Failed to clear CoreData: \(error)")
-            connectionTestResult = .failure(message: "Failed to clear data: \(error.localizedDescription)")
-        }
+        // TODO: Implement clearAllData() method in DashboardKit.CoreDataManager
+        // For now, just show a message
+        connectionTestResult = .failure(message: "Clear all data not yet implemented")
     }
     
     private func showDashboardExportPanel() {

@@ -121,16 +121,14 @@ struct DashboardMainView: View {
 
     @ViewBuilder
     private func dashboardInputsSection(for dashboard: Dashboard) -> some View {
-        guard let inputs = dashboard.inputs as? Set<DashboardInput>, !inputs.isEmpty else {
-            EmptyView()
-        }
-
-        Section {
-            ForEach(Array(inputs).sorted(by: { ($0.inputId ?? "") < ($1.inputId ?? "") })) { input in
-                TokenInputView(adapter: TokenAdapter(input: input))
+        if let inputs = dashboard.inputs as? Set<DashboardInput>, !inputs.isEmpty {
+            Section {
+                ForEach(Array(inputs).sorted(by: { ($0.inputId ?? "") < ($1.inputId ?? "") })) { input in
+                    TokenInputView(adapter: TokenAdapter(input: input))
+                }
+            } header: {
+                Label("Dashboard Inputs", systemImage: "slider.horizontal.3")
             }
-        } header: {
-            Label("Dashboard Inputs", systemImage: "slider.horizontal.3")
         }
     }
 
@@ -158,13 +156,23 @@ struct DashboardMainView: View {
                     }
 
             case .render:
-                DashboardRenderView(dashboard: dashboard)
-                    .id(dashboard.id)
-                    .toolbar {
-                        ToolbarItemGroup(placement: .automatic) {
-                            renderToolbarButtons
-                        }
-                    }
+                // TODO: Migrate DashboardRenderView to use new Dashboard entity
+                VStack(spacing: 20) {
+                    Image(systemName: "hammer.fill")
+                        .font(.system(size: 60))
+                        .foregroundStyle(.secondary)
+                    Text("Dashboard Rendering")
+                        .font(.title)
+                        .fontWeight(.semibold)
+                    Text("Render mode is being migrated to the new architecture")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                    Text("Use Monitor mode to view dashboard data sources and results")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .id(dashboard.id)
             }
         } else {
             emptyState
@@ -275,12 +283,46 @@ struct DashboardRowView: View {
 
 // MARK: - Preview
 
+// MARK: - Dashboard Settings View (Stub)
+
+/// Placeholder settings view - TODO: Implement full settings UI
+struct DashboardSettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var settings = DashboardMonitorSettings.shared
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Cell Change Highlighting") {
+                    Text("Settings UI coming soon")
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Table Appearance") {
+                    Text("Font, colors, and spacing controls")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Dashboard Settings")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        settings.saveSettings()
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .frame(minWidth: 500, minHeight: 400)
+    }
+}
+
 #if DEBUG
 @available(macOS 26, tvOS 26, *)
 struct DashboardMainView_Previews: PreviewProvider {
     static var previews: some View {
         DashboardMainView()
-            .environment(\.managedObjectContext, DashboardKit.CoreDataManager.shared.viewContext)
+            .environment(\.managedObjectContext, PersistenceController.preview.container.viewContext)
     }
 }
 #endif

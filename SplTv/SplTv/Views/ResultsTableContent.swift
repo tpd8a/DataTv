@@ -493,7 +493,7 @@ struct ResultsTableContent: View {
     // MARK: - Preferences
 
     private func loadTablePreferences() {
-        guard let dashboardId = execution.dashboardId,
+        guard let dashboardId = execution.dataSource?.dashboard?.id?.uuidString,
               let searchId = execution.searchId else { return }
 
         let prefs = settings.getTablePreferences(dashboardId: dashboardId, searchId: searchId)
@@ -507,7 +507,7 @@ struct ResultsTableContent: View {
     }
 
     private func saveTablePreferences() {
-        guard let dashboardId = execution.dashboardId,
+        guard let dashboardId = execution.dataSource?.dashboard?.id?.uuidString,
               let searchId = execution.searchId else { return }
 
         var prefs = TableViewPreferences()
