@@ -4,7 +4,8 @@ import DashboardKit
 /// Main detail view for displaying dashboard information and search results
 struct DashboardDetailView: View {
     let dashboard: Dashboard
-    @StateObject private var refreshWorker = DashboardRefreshWorker.shared
+    // Note: DashboardRefreshWorker not yet migrated - auto-refresh disabled for now
+    // @StateObject private var refreshWorker = DashboardRefreshWorker.shared
     @State private var selectedDataSourceId: String?
 
     var body: some View {
@@ -66,12 +67,13 @@ struct DashboardDetailView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(dataSources.asAdapters) { adapter in
-                    let timerKey = "\(dashboard.id?.uuidString ?? ""):\(adapter.sourceId)"
-                    let timerInfo = refreshWorker.activeSearchTimers[timerKey]
+                    // Timer info disabled until DashboardRefreshWorker migrated
+                    // let timerKey = "\(dashboard.id?.uuidString ?? ""):\(adapter.sourceId)"
+                    // let timerInfo = refreshWorker.activeSearchTimers[timerKey]
 
                     SearchRowView(
                         adapter: adapter,
-                        timerInfo: timerInfo,
+                        // timerInfo: timerInfo,  // Disabled - DashboardRefreshWorker not migrated
                         isSelected: selectedDataSourceId == adapter.sourceId,
                         onSelect: { selectedDataSourceId = adapter.sourceId }
                     )

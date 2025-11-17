@@ -8,6 +8,7 @@
 import SwiftUI
 import CoreData
 import DashboardKit
+import d8aTvCore  // Legacy entity support (DashboardEntity, SplunkCredentialManager)
 import UniformTypeIdentifiers
 
 #if os(macOS) || os(tvOS)
@@ -35,19 +36,22 @@ struct SplTvApp: App {
             // Add custom menu commands
             CommandGroup(replacing: .newItem) { }
             
+            // Refresh timer commands disabled until DashboardRefreshWorker migrated
+            /*
             CommandGroup(after: .toolbar) {
                 Button("Start All Timers") {
                     DashboardRefreshWorker.shared.startAllRefreshTimers()
                 }
                 .keyboardShortcut("r", modifiers: [.command])
-                
+
                 Button("Stop All Timers") {
                     DashboardRefreshWorker.shared.stopAllTimers()
                 }
                 .keyboardShortcut("s", modifiers: [.command])
-                
+
                 Divider()
             }
+            */
         }
         
         Settings {
