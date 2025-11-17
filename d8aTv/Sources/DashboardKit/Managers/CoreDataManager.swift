@@ -87,7 +87,7 @@ public actor CoreDataManager {
                 dataSource.query = sourceDef.options?.query
                 dataSource.refresh = sourceDef.options?.refresh
                 dataSource.refreshType = sourceDef.options?.refreshType
-                dataSource.extendsId = sourceDef.extends
+                dataSource.extendsId = sourceDef.options?.extend ?? sourceDef.extends
 
                 if let options = sourceDef.options,
                    let optionsData = try? encoder.encode(options),
@@ -133,7 +133,7 @@ public actor CoreDataManager {
             // Save layout
             let layout = DashboardLayout(context: context)
             layout.id = UUID()
-            layout.type = config.layout.type.rawValue
+            layout.type = config.layout.type?.rawValue ?? "absolute"
 
             if let options = config.layout.options,
                let optionsData = try? JSONSerialization.data(withJSONObject: options.mapValues { $0.value }),
@@ -143,8 +143,9 @@ public actor CoreDataManager {
 
             layout.dashboard = dashboard
 
-            // Save layout items
-            for structureItem in config.layout.structure {
+            // Save layout items (if structure exists - for converted SimpleXML)
+            if let structure = config.layout.structure {
+                for structureItem in structure {
                 let layoutItem = LayoutItem(context: context)
                 layoutItem.id = UUID()
                 layoutItem.type = structureItem.type.rawValue
@@ -165,6 +166,7 @@ public actor CoreDataManager {
                     }
                 }
             }
+            }
 
             // Save inputs
             if let inputs = config.inputs {
@@ -174,8 +176,22 @@ public actor CoreDataManager {
                     input.inputId = inputId
                     input.type = inputDef.type
                     input.title = inputDef.title
-                    input.token = inputDef.token
-                    input.defaultValue = inputDef.defaultValue
+
+                    // Extract token - check both top-level and options.token
+                    if let token = inputDef.token {
+                        input.token = token
+                    } else if let options = inputDef.options,
+                              let tokenValue = options["token"]?.value as? String {
+                        input.token = tokenValue
+                    }
+
+                    // Extract defaultValue - check both top-level and options.defaultValue
+                    if let defaultValue = inputDef.defaultValue {
+                        input.defaultValue = defaultValue
+                    } else if let options = inputDef.options,
+                              let defaultValue = options["defaultValue"]?.value as? String {
+                        input.defaultValue = defaultValue
+                    }
 
                     if let options = inputDef.options,
                        let optionsData = try? JSONSerialization.data(withJSONObject: options.mapValues { $0.value }),
