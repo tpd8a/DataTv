@@ -572,10 +572,10 @@ struct CompactSearchResultsView: View {
     let dashboardId: String
     let searchId: String
     let showTimeline: Bool
-    
+
     @Environment(\.managedObjectContext) private var viewContext
-    @State private var executions: [SearchExecutionEntity] = []
-    @State private var selectedExecutionId: String?
+    @State private var executions: [SearchExecution] = []
+    @State private var dataSourceUUID: UUID?
     @State private var hasTablePreferences: Bool = false
     
     var body: some View {
@@ -588,27 +588,30 @@ struct CompactSearchResultsView: View {
                         Circle()
                             .fill(statusColor(latest))
                             .frame(width: 6, height: 6)
-                        
+
                         // Row count
                         Text("\(latest.resultCount) rows")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
-                        
+
                         Text("•")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
-                        
+
                         // Timestamp
-                        Text(latest.startTime, formatter: timeFormatter)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        
+                        if let startTime = latest.startTime {
+                            Text(startTime, formatter: timeFormatter)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+
                         // Execution duration (if available)
-                        if let duration = latest.executionDuration {
+                        if let endTime = latest.endTime, let startTime = latest.startTime {
+                            let duration = endTime.timeIntervalSince(startTime)
                             Text("•")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
-                            
+
                             Text(String(format: "%.2fs", duration))
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
@@ -637,21 +640,20 @@ struct CompactSearchResultsView: View {
             }
             
             // Full SearchResultsTableView (will show/hide its timeline based on parent state)
-            if showTimeline {
+            if showTimeline, let dsUUID = dataSourceUUID, let dbUUID = UUID(uuidString: dashboardId) {
                 SearchResultsTableView(
-                    dashboardId: dashboardId,
-                    searchId: searchId
+                    dashboardId: dbUUID,
+                    dataSourceId: dsUUID
                 )
                 .frame(maxWidth: .infinity) // Fill available width
             } else {
                 // Just show the results table directly
-                if let executionId = selectedExecutionId,
-                   let execution = executions.first(where: { $0.id == executionId }) {
-                    let currentIndex = executions.firstIndex(where: { $0.id == executionId }) ?? 0
-                    let hasPrevious = currentIndex < executions.count - 1
-                    
+                if let execution = executions.first {
+                    let currentIndex = 0
+                    let hasPrevious = executions.count > 1
+
                     if hasPrevious {
-                        let previousExecution = executions[currentIndex + 1]
+                        let previousExecution = executions[1]
                         ResultsTableContent(
                             execution: execution,
                             previousExecution: previousExecution,
@@ -684,23 +686,37 @@ struct CompactSearchResultsView: View {
     }
     
     private func loadExecutions() {
-        let request: NSFetchRequest<SearchExecutionEntity> = SearchExecutionEntity.fetchRequest()
-        request.predicate = NSPredicate(
-            format: "searchId == %@ AND dashboardId == %@",
+        // First, find the DataSource UUID from sourceId
+        let dsRequest: NSFetchRequest<DataSource> = DataSource.fetchRequest()
+        dsRequest.predicate = NSPredicate(
+            format: "sourceId == %@ AND dashboard.id == %@",
             searchId,
-            dashboardId
+            UUID(uuidString: dashboardId) as CVarArg? ?? UUID() as CVarArg
         )
-        request.sortDescriptors = [NSSortDescriptor(key: "startTime", ascending: false)]
-        request.fetchLimit = 10
-        
+        dsRequest.fetchLimit = 1
+
         do {
-            executions = try viewContext.fetch(request)
-            if let latest = executions.first(where: { $0.executionStatus == .completed }) {
-                selectedExecutionId = latest.id
+            if let dataSource = try viewContext.fetch(dsRequest).first,
+               let dsUUID = dataSource.id {
+                dataSourceUUID = dsUUID
+
+                // Now fetch executions for this dataSource
+                let request: NSFetchRequest<SearchExecution> = SearchExecution.fetchRequest()
+                request.predicate = NSPredicate(
+                    format: "dataSource.id == %@",
+                    dsUUID as CVarArg
+                )
+                request.sortDescriptors = [NSSortDescriptor(key: "startTime", ascending: false)]
+                request.fetchLimit = 10
+
+                executions = try viewContext.fetch(request)
+
+                // Check if table preferences exist
+                checkTablePreferences()
+            } else {
+                print("⚠️ DataSource not found for searchId: \(searchId)")
+                executions = []
             }
-            
-            // Check if table preferences exist
-            checkTablePreferences()
         } catch {
             print("❌ Error loading executions: \(error)")
             executions = []
@@ -725,13 +741,14 @@ struct CompactSearchResultsView: View {
         loadExecutions()
     }
     
-    private func statusColor(_ execution: SearchExecutionEntity) -> Color {
-        switch execution.executionStatus {
-        case .completed: return .green
-        case .running: return .blue
-        case .failed: return .red
-        case .pending: return .orange
-        case .cancelled: return .gray
+    private func statusColor(_ execution: SearchExecution) -> Color {
+        switch execution.status {
+        case "completed": return .green
+        case "running": return .blue
+        case "failed": return .red
+        case "pending": return .orange
+        case "cancelled": return .gray
+        default: return .gray
         }
     }
     
