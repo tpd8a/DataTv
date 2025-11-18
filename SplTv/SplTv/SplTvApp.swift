@@ -1095,9 +1095,9 @@ struct DashboardExportView: View {
         savePanel.nameFieldStringValue = "\(dashboardName)_export.json"
         savePanel.allowedContentTypes = [.json]
         savePanel.canCreateDirectories = true
-        savePanel.begin { [self] response in
+        savePanel.begin { response in
             if response == .OK, let url = savePanel.url {
-                Task {
+                Task { @MainActor in
                     do {
                         // Create export data structure
                         var exportData: [String: Any] = [
@@ -1134,20 +1134,16 @@ struct DashboardExportView: View {
                         let jsonData = try JSONSerialization.data(withJSONObject: exportData, options: [.prettyPrinted, .sortedKeys])
                         try jsonData.write(to: url)
 
-                        await MainActor.run {
-                            exportStatus = "Success: Dashboard exported to \(url.lastPathComponent)"
-                            isExporting = false
-                        }
+                        self.exportStatus = "Success: Dashboard exported to \(url.lastPathComponent)"
+                        self.isExporting = false
                     } catch {
-                        await MainActor.run {
-                            exportStatus = "Error: \(error.localizedDescription)"
-                            isExporting = false
-                        }
+                        self.exportStatus = "Error: \(error.localizedDescription)"
+                        self.isExporting = false
                     }
                 }
             } else {
-                exportStatus = "Export cancelled"
-                isExporting = false
+                self.exportStatus = "Export cancelled"
+                self.isExporting = false
             }
         }
     }

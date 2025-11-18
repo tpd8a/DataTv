@@ -49,7 +49,9 @@ struct PersistenceController {
             fatalError("Failed to load DashboardKit CoreData model 'DashboardModel'. Check that DashboardKit package is properly linked.")
         }
 
-        container = NSPersistentContainer(name: "SplTv", managedObjectModel: model)
+        // IMPORTANT: Use "DashboardModel" to match CoreDataManager's persistent store name
+        // This ensures both use the same SQLite database file
+        container = NSPersistentContainer(name: "DashboardModel", managedObjectModel: model)
         container.loadPersistentStores { description, error in
             if let error = error {
                 fatalError("Failed to load persistent stores: \(error)")
