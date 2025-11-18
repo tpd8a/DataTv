@@ -516,7 +516,18 @@ struct SettingsView: View {
     }
     
     // MARK: - Helper Functions
-    
+
+    /// Create a URLSession configured with SSL settings
+    private func createURLSession() -> URLSession {
+        if splunkAllowInsecure || !splunkValidateSSL {
+            // Use a delegate that bypasses SSL validation
+            let delegate = InsecureURLSessionDelegate()
+            return URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+        } else {
+            return URLSession.shared
+        }
+    }
+
     private func testSplunkConnection() async {
         isTestingConnection = true
         connectionTestResult = nil
@@ -530,9 +541,22 @@ struct SettingsView: View {
                 return
             }
 
-            // Get credentials from keychain
-            let authToken: String?
+            let port = baseURL.port ?? 8089
+            let useSSL = baseURL.scheme == "https"
+            let scheme = useSSL ? "https" : "http"
+
+            // Build URL for server info endpoint
+            let testURL = URL(string: "\(scheme)://\(host):\(port)/services/server/info")!
+            var urlComponents = URLComponents(url: testURL, resolvingAgainstBaseURL: true)!
+            urlComponents.queryItems = [URLQueryItem(name: "output_mode", value: "json")]
+
+            var request = URLRequest(url: urlComponents.url!)
+            request.timeoutInterval = splunkTimeout
+
+            // Add authentication
             if splunkAuthType == "token" {
+                // Token authentication
+                let authToken: String
                 do {
                     authToken = try await CredentialManager.shared.retrieveAuthToken(host: host)
                 } catch {
@@ -544,38 +568,46 @@ struct SettingsView: View {
                         return
                     }
                 }
+                request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
             } else {
+                // Basic authentication
+                let password: String
                 do {
-                    _ = try await CredentialManager.shared.retrieveCredentials(host: host, username: splunkUsername)
-                    // For basic auth, we'll use password from keychain
-                    // SplunkDataSource doesn't support password auth yet, so use token for now
-                    connectionTestResult = .failure(message: "Basic auth testing not yet supported. Please use token authentication.")
-                    isTestingConnection = false
-                    return
+                    password = try await CredentialManager.shared.retrieveCredentials(host: host, username: splunkUsername)
                 } catch {
-                    connectionTestResult = .failure(message: "No credentials found. Please store password first.")
-                    isTestingConnection = false
-                    return
+                    if !splunkPassword.isEmpty {
+                        password = splunkPassword
+                    } else {
+                        connectionTestResult = .failure(message: "No password found. Please enter and store a password first.")
+                        isTestingConnection = false
+                        return
+                    }
+                }
+
+                let credentials = "\(splunkUsername):\(password)"
+                if let credentialsData = credentials.data(using: .utf8) {
+                    let base64Credentials = credentialsData.base64EncodedString()
+                    request.setValue("Basic \(base64Credentials)", forHTTPHeaderField: "Authorization")
                 }
             }
 
-            // Create SplunkDataSource and test connection
-            let port = baseURL.port ?? 8089
-            let useSSL = baseURL.scheme == "https"
+            // Use custom URLSession with SSL settings
+            let urlSession = createURLSession()
+            let (_, response) = try await urlSession.data(for: request)
 
-            let dataSource = SplunkDataSource(
-                host: host,
-                port: port,
-                authToken: authToken,
-                useSSL: useSSL
-            )
+            guard let httpResponse = response as? HTTPURLResponse else {
+                connectionTestResult = .failure(message: "Invalid response from server")
+                isTestingConnection = false
+                return
+            }
 
-            let isConnected = try await dataSource.validateConnection()
-
-            if isConnected {
-                connectionTestResult = .success(message: "Successfully connected to \(host):\(port)")
+            if (200...299).contains(httpResponse.statusCode) {
+                let authTypeDisplay = splunkAuthType == "token" ? "token" : "username/password"
+                connectionTestResult = .success(message: "Successfully connected to \(host):\(port) using \(authTypeDisplay)")
+            } else if httpResponse.statusCode == 401 {
+                connectionTestResult = .failure(message: "Authentication failed - check credentials")
             } else {
-                connectionTestResult = .failure(message: "Connection failed - server returned error")
+                connectionTestResult = .failure(message: "Connection failed - server returned status \(httpResponse.statusCode)")
             }
         } catch {
             connectionTestResult = .failure(message: "Connection failed: \(error.localizedDescription)")
@@ -707,22 +739,6 @@ struct SettingsView: View {
                 return
             }
 
-            // Get auth token from keychain
-            let authToken: String
-            if splunkAuthType == "token" {
-                do {
-                    authToken = try await CredentialManager.shared.retrieveAuthToken(host: host)
-                } catch {
-                    syncResult = .failure(message: "No token found. Please store a token first.")
-                    isSyncing = false
-                    return
-                }
-            } else {
-                syncResult = .failure(message: "Dashboard sync requires token authentication. Please use token auth.")
-                isSyncing = false
-                return
-            }
-
             // Build REST API URL for dashboard listing
             let port = baseURL.port ?? 8089
             let useSSL = baseURL.scheme == "https"
@@ -737,9 +753,41 @@ struct SettingsView: View {
             ]
 
             var request = URLRequest(url: urlComponents.url!)
-            request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
+            request.timeoutInterval = splunkTimeout
 
-            let (data, response) = try await URLSession.shared.data(for: request)
+            // Add authentication
+            if splunkAuthType == "token" {
+                // Token authentication
+                let authToken: String
+                do {
+                    authToken = try await CredentialManager.shared.retrieveAuthToken(host: host)
+                } catch {
+                    syncResult = .failure(message: "No token found. Please store a token first.")
+                    isSyncing = false
+                    return
+                }
+                request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
+            } else {
+                // Basic authentication
+                let password: String
+                do {
+                    password = try await CredentialManager.shared.retrieveCredentials(host: host, username: splunkUsername)
+                } catch {
+                    syncResult = .failure(message: "No password found. Please store password first.")
+                    isSyncing = false
+                    return
+                }
+
+                let credentials = "\(splunkUsername):\(password)"
+                if let credentialsData = credentials.data(using: .utf8) {
+                    let base64Credentials = credentialsData.base64EncodedString()
+                    request.setValue("Basic \(base64Credentials)", forHTTPHeaderField: "Authorization")
+                }
+            }
+
+            // Use custom URLSession with SSL settings
+            let urlSession = createURLSession()
+            let (data, response) = try await urlSession.data(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse,
                   (200...299).contains(httpResponse.statusCode) else {
@@ -1125,6 +1173,27 @@ private struct SplunkViewContent: Codable {
     enum CodingKeys: String, CodingKey {
         case eaiData = "eai:data"
         case rootNode
+    }
+}
+
+// MARK: - Insecure URLSession Delegate
+
+/// URLSession delegate that bypasses SSL certificate validation
+/// Used when user has enabled "Allow Insecure Connections" or disabled "Validate SSL Certificates"
+private class InsecureURLSessionDelegate: NSObject, URLSessionDelegate {
+    func urlSession(
+        _ session: URLSession,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        // Bypass SSL certificate validation
+        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+           let trust = challenge.protectionSpace.serverTrust {
+            let credential = URLCredential(trust: trust)
+            completionHandler(.useCredential, credential)
+        } else {
+            completionHandler(.performDefaultHandling, nil)
+        }
     }
 }
 
