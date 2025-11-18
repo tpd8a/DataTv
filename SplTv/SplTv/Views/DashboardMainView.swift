@@ -158,7 +158,7 @@ struct DashboardMainView: View {
                     }
 
             case .render:
-                DashboardRenderView(dashboard: dashboard)
+                DashboardStudioRenderView(dashboard: dashboard)
                     .id(dashboard.id)
                     .toolbar {
                         ToolbarItemGroup(placement: .automatic) {
