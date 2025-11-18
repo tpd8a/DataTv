@@ -520,80 +520,11 @@ struct SettingsView: View {
     private func testSplunkConnection() async {
         isTestingConnection = true
         connectionTestResult = nil
-        
-        do {
-            // Validate URL
-            guard let baseURL = URL(string: splunkBaseURL) else {
-                connectionTestResult = .failure(message: "Invalid URL format")
-                isTestingConnection = false
-                return
-            }
-            
-            // Try to get credentials from keychain based on auth type
-            let credentials: SplunkCredentials
-            
-            if splunkAuthType == "token" {
-                // Token authentication
-                do {
-                    let serverHost = baseURL.host ?? "localhost"
-                    let token = try await CredentialManager.shared.retrieveAuthToken(host: serverHost)
-                    credentials = .token(token)
-                } catch {
-                    // If no token in keychain, use the token field if available
-                    if !splunkToken.isEmpty {
-                        credentials = .token(splunkToken)
-                    } else {
-                        connectionTestResult = .failure(message: "No token found. Please enter and store a token first.")
-                        isTestingConnection = false
-                        return
-                    }
-                }
-            } else {
-                // Basic authentication
-                do {
-                    let serverHost = baseURL.host ?? "localhost"
-                    let password = try await CredentialManager.shared.retrieveCredentials(host: serverHost, username: splunkUsername)
-                    credentials = .basic(username: splunkUsername, password: password)
-                } catch {
-                    // If no credentials in keychain, use the password field if available
-                    if !splunkPassword.isEmpty {
-                        credentials = .basic(username: splunkUsername, password: splunkPassword)
-                    } else {
-                        connectionTestResult = .failure(message: "No password found. Please enter and store a password first.")
-                        isTestingConnection = false
-                        return
-                    }
-                }
-            }
-            
-            // Create configuration
-            let config = SplunkConfiguration(
-                baseURL: baseURL,
-                credentials: credentials,
-                defaultApp: splunkDefaultApp,
-                defaultOwner: splunkDefaultOwner,
-                timeout: splunkTimeout,
-                maxRetries: splunkMaxRetries,
-                retryDelay: splunkRetryDelay,
-                allowInsecureConnections: splunkAllowInsecure,
-                validateSSLCertificate: splunkValidateSSL
-            )
-            
-            // Create REST client and test connectivity
-            let restClient = SplunkRestClient(configuration: config)
-            
-            do {
-                try await restClient.testConnectivity()
-                let authTypeDisplay = splunkAuthType == "token" ? "token" : "username/password"
-                connectionTestResult = .success(message: "Successfully connected to \(baseURL.host ?? splunkBaseURL) using \(authTypeDisplay)")
-            } catch {
-                connectionTestResult = .failure(message: "Connection failed: \(error.localizedDescription)")
-            }
-            
-        } catch {
-            connectionTestResult = .failure(message: "Error: \(error.localizedDescription)")
-        }
-        
+
+        // TODO: Migrate to modern DashboardKit Splunk integration
+        // Legacy d8aTvCore Splunk integration removed in Phase 8
+        connectionTestResult = .failure(message: "Splunk connection testing not yet implemented with DashboardKit")
+
         isTestingConnection = false
     }
     
@@ -710,103 +641,11 @@ struct SettingsView: View {
     private func syncDashboards() async {
         isSyncing = true
         syncResult = nil
-        
-        do {
-            // Validate URL
-            guard let baseURL = URL(string: splunkBaseURL) else {
-                syncResult = .failure(message: "Invalid URL format")
-                isSyncing = false
-                return
-            }
-            
-            // Try to get credentials from keychain based on auth type
-            let credentials: SplunkCredentials
-            
-            if splunkAuthType == "token" {
-                do {
-                    let serverHost = baseURL.host ?? "localhost"
-                    let token = try credentialManager.retrieveToken(server: serverHost)
-                    credentials = .token(token)
-                } catch {
-                    syncResult = .failure(message: "No token found. Please store a token first.")
-                    isSyncing = false
-                    return
-                }
-            } else {
-                do {
-                    let serverHost = baseURL.host ?? "localhost"
-                    let password = try credentialManager.retrieveCredentials(server: serverHost, username: splunkUsername)
-                    credentials = .basic(username: splunkUsername, password: password)
-                } catch {
-                    syncResult = .failure(message: "No credentials found. Please store password first.")
-                    isSyncing = false
-                    return
-                }
-            }
-            
-            // Create configuration
-            let config = SplunkConfiguration(
-                baseURL: baseURL,
-                credentials: credentials,
-                defaultApp: splunkDefaultApp,
-                defaultOwner: splunkDefaultOwner,
-                timeout: splunkTimeout,
-                maxRetries: splunkMaxRetries,
-                retryDelay: splunkRetryDelay,
-                allowInsecureConnections: splunkAllowInsecure,
-                validateSSLCertificate: splunkValidateSSL
-            )
-            
-            // Create REST client and dashboard service
-            let restClient = SplunkRestClient(configuration: config)
-            let dashboardService = SplunkDashboardService(restClient: restClient)
-            
-            // Fetch dashboards from Splunk
-            do {
-                let dashboardList = try await dashboardService.listDashboards(
-                    owner: splunkDefaultOwner, app: splunkDefaultApp
-                )
-                
-                var syncedCount = 0
-                let maxToSync = min(dashboardList.entry.count, syncMaxDashboards)
-                
-                // Load each dashboard and store in Core Data
-                for dashboard in dashboardList.entry.prefix(maxToSync) {
-                    // Apply filters - check author instead of owner
-                    if !syncIncludePrivate && dashboard.author != splunkDefaultOwner {
-                        continue
-                    }
-                    
-                    // The XML content is already in the dashboard's content.eaiData
-                    let xmlContent = dashboard.content.eaiData
-                    
-                    // Parse and load into Core Data using DashboardLoader
-                    let loader = DashboardLoader()
-                    do {
-                        try loader.loadDashboard(
-                            xmlContent: xmlContent,
-                            dashboardId: dashboard.name,
-                            appName: splunkDefaultApp
-                        )
-                        syncedCount += 1
-                    } catch {
-                        print("⚠️ Failed to load dashboard '\(dashboard.name)': \(error.localizedDescription)")
-                    }
-                }
-                
-                // Update statistics
-                await MainActor.run {
-                    lastSyncDate = Date()
-                    updateDashboardCount()
-                }
-                
-                syncResult = .success(message: "Synced \(syncedCount) of \(maxToSync) dashboards from '\(splunkDefaultApp)' app")
-            } catch {
-                syncResult = .failure(message: "Sync failed: \(error.localizedDescription)")
-            }
-            
-        }
-        
+
+        // TODO: Migrate to modern DashboardKit Splunk integration
+        // Legacy d8aTvCore Splunk integration removed in Phase 8
+        syncResult = .failure(message: "Dashboard sync not yet implemented with DashboardKit")
+
         isSyncing = false
     }
 
@@ -822,8 +661,8 @@ struct SettingsView: View {
     }
     
     private func calculateCoreDataSize() {
-        // Use persistenceController (which uses DashboardKit model)
-        guard let storeURL = persistenceController.container.persistentStoreCoordinator.persistentStores.first?.url else {
+        // Use PersistenceController.shared (which uses DashboardKit model)
+        guard let storeURL = PersistenceController.shared.container.persistentStoreCoordinator.persistentStores.first?.url else {
             coreDataSize = "Unable to determine size"
             return
         }
@@ -843,7 +682,7 @@ struct SettingsView: View {
     }
 
     private func clearAllCoreData() {
-        let context = persistenceController.context
+        let context = PersistenceController.shared.context
 
         // Delete all DashboardKit entities
         let entityNames = [

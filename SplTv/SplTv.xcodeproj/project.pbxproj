@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		D036EF022EBFFA120085AFF1 /* d8aTvCore in Frameworks */ = {isa = PBXBuildFile; productRef = D036EF012EBFFA120085AFF1 /* d8aTvCore */; };
+		D00EDC872ECC725600319684 /* DashboardKit in Frameworks */ = {isa = PBXBuildFile; productRef = D00EDC862ECC725600319684 /* DashboardKit */; };
 		D072371E2EC65A24004B7528 /* SETTINGS_UPDATE_FIX.md in Resources */ = {isa = PBXBuildFile; fileRef = D072371D2EC65A24004B7528 /* SETTINGS_UPDATE_FIX.md */; };
 		D07237202EC65B56004B7528 /* SETTINGS_FIX_SUMMARY.md in Resources */ = {isa = PBXBuildFile; fileRef = D072371F2EC65B56004B7528 /* SETTINGS_FIX_SUMMARY.md */; };
 /* End PBXBuildFile section */
@@ -31,13 +31,20 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				D036EF022EBFFA120085AFF1 /* d8aTvCore in Frameworks */,
+				D00EDC872ECC725600319684 /* DashboardKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		D00EDC852ECC725600319684 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		D036EEE42EBFF9BF0085AFF1 = {
 			isa = PBXGroup;
 			children = (
@@ -45,6 +52,7 @@
 				D036EEEE2EBFF9BF0085AFF1 /* Products */,
 				D072371D2EC65A24004B7528 /* SETTINGS_UPDATE_FIX.md */,
 				D072371F2EC65B56004B7528 /* SETTINGS_FIX_SUMMARY.md */,
+				D00EDC852ECC725600319684 /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -76,7 +84,7 @@
 			);
 			name = SplTv;
 			packageProductDependencies = (
-				D036EF012EBFFA120085AFF1 /* d8aTvCore */,
+				D00EDC862ECC725600319684 /* DashboardKit */,
 			);
 			productName = SplTv;
 			productReference = D036EEED2EBFF9BF0085AFF1 /* SplTv.app */;
@@ -405,9 +413,10 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		D036EF012EBFFA120085AFF1 /* d8aTvCore */ = {
+		D00EDC862ECC725600319684 /* DashboardKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = d8aTvCore;
+			package = D036EF002EBFFA120085AFF1 /* XCLocalSwiftPackageReference "../d8aTv" */;
+			productName = DashboardKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
