@@ -6,50 +6,55 @@
 //
 
 import CoreData
+import DashboardKit
 
 /// Persistence controller for SplTV
-/// Uses DashboardKit's CoreData manager directly
+/// Wrapper around DashboardKit's CoreDataManager
 struct PersistenceController {
-    // Deprecated - use DashboardKit.manager instead
     static let shared = PersistenceController()
 
     @MainActor
     static let preview: PersistenceController = {
-        let result = PersistenceController(inMemory: true)
-        return result
+        // For previews, we'll use the same shared instance
+        // TODO: Implement in-memory store for previews if needed
+        return PersistenceController.shared
     }()
 
     let container: NSPersistentContainer
 
-    init(inMemory: Bool = false) {
-        // Load DashboardKit's CoreData model from the package
-        let modelName = "DashboardModel"
+    private init() {
+        // Find the DashboardKit resource bundle
+        var foundModel: NSManagedObjectModel?
 
-        // Try to find the model in DashboardKit bundle
-        var modelURL: URL?
-
-        // Check in main bundle first (when DashboardKit is linked)
-        if let url = Bundle.main.url(forResource: modelName, withExtension: "momd") {
-            modelURL = url
+        // First, try to find the DashboardKit_DashboardKit bundle in the app's Resources
+        if let resourceURL = Bundle.main.resourceURL,
+           let bundleURL = Bundle(url: resourceURL.appendingPathComponent("DashboardKit_DashboardKit.bundle")),
+           let modelURL = bundleURL.url(forResource: "DashboardModel", withExtension: "momd"),
+           let model = NSManagedObjectModel(contentsOf: modelURL) {
+            foundModel = model
         }
 
-        guard let url = modelURL,
-              let model = NSManagedObjectModel(contentsOf: url) else {
-            fatalError("Failed to load DashboardKit CoreData model '\(modelName)'")
+        // Fallback: search all loaded bundles
+        if foundModel == nil {
+            for bundle in Bundle.allBundles {
+                if let url = bundle.url(forResource: "DashboardModel", withExtension: "momd"),
+                   let model = NSManagedObjectModel(contentsOf: url) {
+                    foundModel = model
+                    break
+                }
+            }
+        }
+
+        guard let model = foundModel else {
+            fatalError("Failed to load DashboardKit CoreData model 'DashboardModel'. Check that DashboardKit package is properly linked.")
         }
 
         container = NSPersistentContainer(name: "SplTv", managedObjectModel: model)
-
-        if inMemory {
-            container.persistentStoreDescriptions.first!.url = URL(fileURLWithPath: "/dev/null")
-        }
-
-        container.loadPersistentStores(completionHandler: { (storeDescription, error) in
-            if let error = error as NSError? {
-                // In production, handle this error gracefully
-                fatalError("Unresolved error \(error), \(error.userInfo)")
+        container.loadPersistentStores { description, error in
+            if let error = error {
+                fatalError("Failed to load persistent stores: \(error)")
             }
-        })
+        }
 
         container.viewContext.automaticallyMergesChangesFromParent = true
         container.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy

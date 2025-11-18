@@ -521,9 +521,65 @@ struct SettingsView: View {
         isTestingConnection = true
         connectionTestResult = nil
 
-        // TODO: Migrate to modern DashboardKit Splunk integration
-        // Legacy d8aTvCore Splunk integration removed in Phase 8
-        connectionTestResult = .failure(message: "Splunk connection testing not yet implemented with DashboardKit")
+        do {
+            // Validate URL
+            guard let baseURL = URL(string: splunkBaseURL),
+                  let host = baseURL.host else {
+                connectionTestResult = .failure(message: "Invalid URL format")
+                isTestingConnection = false
+                return
+            }
+
+            // Get credentials from keychain
+            let authToken: String?
+            if splunkAuthType == "token" {
+                do {
+                    authToken = try await CredentialManager.shared.retrieveAuthToken(host: host)
+                } catch {
+                    if !splunkToken.isEmpty {
+                        authToken = splunkToken
+                    } else {
+                        connectionTestResult = .failure(message: "No token found. Please enter and store a token first.")
+                        isTestingConnection = false
+                        return
+                    }
+                }
+            } else {
+                do {
+                    _ = try await CredentialManager.shared.retrieveCredentials(host: host, username: splunkUsername)
+                    // For basic auth, we'll use password from keychain
+                    // SplunkDataSource doesn't support password auth yet, so use token for now
+                    connectionTestResult = .failure(message: "Basic auth testing not yet supported. Please use token authentication.")
+                    isTestingConnection = false
+                    return
+                } catch {
+                    connectionTestResult = .failure(message: "No credentials found. Please store password first.")
+                    isTestingConnection = false
+                    return
+                }
+            }
+
+            // Create SplunkDataSource and test connection
+            let port = baseURL.port ?? 8089
+            let useSSL = baseURL.scheme == "https"
+
+            let dataSource = SplunkDataSource(
+                host: host,
+                port: port,
+                authToken: authToken,
+                useSSL: useSSL
+            )
+
+            let isConnected = try await dataSource.validateConnection()
+
+            if isConnected {
+                connectionTestResult = .success(message: "Successfully connected to \(host):\(port)")
+            } else {
+                connectionTestResult = .failure(message: "Connection failed - server returned error")
+            }
+        } catch {
+            connectionTestResult = .failure(message: "Connection failed: \(error.localizedDescription)")
+        }
 
         isTestingConnection = false
     }
@@ -642,9 +698,114 @@ struct SettingsView: View {
         isSyncing = true
         syncResult = nil
 
-        // TODO: Migrate to modern DashboardKit Splunk integration
-        // Legacy d8aTvCore Splunk integration removed in Phase 8
-        syncResult = .failure(message: "Dashboard sync not yet implemented with DashboardKit")
+        do {
+            // Validate URL
+            guard let baseURL = URL(string: splunkBaseURL),
+                  let host = baseURL.host else {
+                syncResult = .failure(message: "Invalid URL format")
+                isSyncing = false
+                return
+            }
+
+            // Get auth token from keychain
+            let authToken: String
+            if splunkAuthType == "token" {
+                do {
+                    authToken = try await CredentialManager.shared.retrieveAuthToken(host: host)
+                } catch {
+                    syncResult = .failure(message: "No token found. Please store a token first.")
+                    isSyncing = false
+                    return
+                }
+            } else {
+                syncResult = .failure(message: "Dashboard sync requires token authentication. Please use token auth.")
+                isSyncing = false
+                return
+            }
+
+            // Build REST API URL for dashboard listing
+            let port = baseURL.port ?? 8089
+            let useSSL = baseURL.scheme == "https"
+            let scheme = useSSL ? "https" : "http"
+
+            // Use Splunk REST API to list views (dashboards)
+            let restURL = URL(string: "\(scheme)://\(host):\(port)/servicesNS/-/\(splunkDefaultApp)/data/ui/views")!
+            var urlComponents = URLComponents(url: restURL, resolvingAgainstBaseURL: true)!
+            urlComponents.queryItems = [
+                URLQueryItem(name: "output_mode", value: "json"),
+                URLQueryItem(name: "count", value: String(min(syncMaxDashboards, 1000)))
+            ]
+
+            var request = URLRequest(url: urlComponents.url!)
+            request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                syncResult = .failure(message: "Failed to fetch dashboards from Splunk")
+                isSyncing = false
+                return
+            }
+
+            // Parse the dashboard list response
+            let dashboardList = try JSONDecoder().decode(SplunkViewsResponse.self, from: data)
+
+            var syncedCount = 0
+            let maxToSync = min(dashboardList.entry.count, syncMaxDashboards)
+
+            // Process each dashboard
+            for entry in dashboardList.entry.prefix(maxToSync) {
+                // Apply filters
+                if !syncIncludePrivate && entry.author != splunkDefaultOwner {
+                    continue
+                }
+
+                // Get the dashboard XML/JSON content
+                guard let dashboardXML = entry.content.eaiData else {
+                    continue
+                }
+
+                // Determine dashboard format
+                let formatType: String
+                if let rootNode = entry.content.rootNode {
+                    formatType = rootNode == "dashboard" || rootNode == "form" ? "simpleXML" : "dashboardStudio"
+                } else {
+                    formatType = "simpleXML"
+                }
+
+                // Save to CoreData using CoreDataManager
+                do {
+                    let manager = await CoreDataManager.shared
+
+                    if formatType == "dashboardStudio" {
+                        // Parse as Dashboard Studio JSON
+                        let parser = await DashboardStudioParser()
+                        let studioConfig = try await parser.parse(dashboardXML)
+                        _ = try await manager.saveDashboard(studioConfig)
+                        syncedCount += 1
+                    } else {
+                        // Parse as Simple XML
+                        let parser = SimpleXMLParser()
+                        let simpleXMLConfig = try parser.parse(dashboardXML)
+                        _ = try await manager.saveDashboard(simpleXMLConfig)
+                        syncedCount += 1
+                    }
+                } catch {
+                    print("⚠️ Failed to save dashboard '\(entry.name)': \(error.localizedDescription)")
+                }
+            }
+
+            // Update statistics
+            await MainActor.run {
+                lastSyncDate = Date()
+                updateDashboardCount()
+            }
+
+            syncResult = .success(message: "Synced \(syncedCount) of \(maxToSync) dashboards from '\(splunkDefaultApp)' app")
+        } catch {
+            syncResult = .failure(message: "Sync failed: \(error.localizedDescription)")
+        }
 
         isSyncing = false
     }
@@ -943,6 +1104,30 @@ struct DashboardExportView: View {
         }
     }
 }
+
+// MARK: - Splunk REST API Response Models
+
+/// Response from Splunk /data/ui/views endpoint
+private struct SplunkViewsResponse: Codable {
+    let entry: [SplunkViewEntry]
+}
+
+private struct SplunkViewEntry: Codable {
+    let name: String
+    let author: String
+    let content: SplunkViewContent
+}
+
+private struct SplunkViewContent: Codable {
+    let eaiData: String?
+    let rootNode: String?
+
+    enum CodingKeys: String, CodingKey {
+        case eaiData = "eai:data"
+        case rootNode
+    }
+}
+
 #endif
 
 #endif
