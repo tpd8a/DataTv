@@ -764,6 +764,10 @@ struct CompactSearchResultsView: View {
 // MARK: - Preview
 
 #if DEBUG
+// Note: Preview disabled - DashboardRenderView uses legacy d8aTvCore entities
+// This view is marked for future migration to DashboardKit entities
+// See MIGRATION_STATUS.md for details
+/*
 struct DashboardRenderView_Previews: PreviewProvider {
     static var previews: some View {
         if let dashboard = CoreDataManager.shared.fetchAllDashboards().first {
@@ -776,6 +780,7 @@ struct DashboardRenderView_Previews: PreviewProvider {
         }
     }
 }
+*/
 #endif
 
 #endif

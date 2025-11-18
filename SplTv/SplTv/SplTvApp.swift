@@ -787,7 +787,8 @@ struct SettingsView: View {
     }
 
     private func updateDashboardCount() {
-        let fetchRequest: NSFetchRequest<DashboardEntity> = DashboardEntity.fetchRequest()
+        // Use new Dashboard entity from DashboardKit
+        let fetchRequest: NSFetchRequest<Dashboard> = Dashboard.fetchRequest()
         do {
             dashboardCount = try viewContext.count(for: fetchRequest)
         } catch {
@@ -797,12 +798,12 @@ struct SettingsView: View {
     }
     
     private func calculateCoreDataSize() {
-        let coreDataManager = CoreDataManager.shared
-        guard let storeURL = coreDataManager.persistentContainer.persistentStoreCoordinator.persistentStores.first?.url else {
+        // Use persistenceController (which uses DashboardKit model)
+        guard let storeURL = persistenceController.container.persistentStoreCoordinator.persistentStores.first?.url else {
             coreDataSize = "Unable to determine size"
             return
         }
-        
+
         do {
             let attributes = try FileManager.default.attributesOfItem(atPath: storeURL.path)
             if let fileSize = attributes[FileAttributeKey.size] as? UInt64 {
@@ -818,13 +819,40 @@ struct SettingsView: View {
     }
     
     private func clearAllCoreData() {
+        let context = persistenceController.context
+
+        // Delete all DashboardKit entities
+        let entityNames = [
+            "Dashboard",
+            "DataSource",
+            "SearchExecution",
+            "SearchResult",
+            "Visualization",
+            "DashboardInput",
+            "DashboardLayout",
+            "LayoutItem",
+            "DataSourceConfig"
+        ]
+
         do {
-            try CoreDataManager.shared.clearAllData()
-            
+            for entityName in entityNames {
+                let fetchRequest = NSFetchRequest<NSFetchRequestResult>(entityName: entityName)
+                let deleteRequest = NSBatchDeleteRequest(fetchRequest: fetchRequest)
+                deleteRequest.resultType = .resultTypeObjectIDs
+
+                let result = try context.execute(deleteRequest) as? NSBatchDeleteResult
+                if let objectIDArray = result?.result as? [NSManagedObjectID] {
+                    let changes = [NSDeletedObjectsKey: objectIDArray]
+                    NSManagedObjectContext.mergeChanges(fromRemoteContextSave: changes, into: [context])
+                }
+            }
+
+            try context.save()
+
             // Update UI
             updateDashboardCount()
             calculateCoreDataSize()
-            
+
             // Show success message
             connectionTestResult = .success(message: "All data cleared successfully")
         } catch {
@@ -952,90 +980,61 @@ extension SplunkCredentialManager {
 struct DashboardExportView: View {
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.dismiss) private var dismiss
-    
-    // Fetch all apps
+
+    // Fetch all dashboards using new Dashboard entity from DashboardKit
     @FetchRequest(
-        sortDescriptors: [NSSortDescriptor(keyPath: \DashboardEntity.appName, ascending: true)],
+        sortDescriptors: [NSSortDescriptor(keyPath: \Dashboard.title, ascending: true)],
         animation: .default)
-    private var allDashboards: FetchedResults<DashboardEntity>
-    
-    @State private var selectedApp: String = ""
-    @State private var selectedDashboardId: String = ""
+    private var allDashboards: FetchedResults<Dashboard>
+
+    @State private var selectedDashboardId: UUID? = nil
     @State private var exportStatus: String = ""
     @State private var isExporting = false
-    
+
     // Computed properties
-    private var availableApps: [String] {
-        let apps = Set(allDashboards.compactMap { $0.appName })
-        return Array(apps).sorted()
-    }
-    
-    private var dashboardsForSelectedApp: [DashboardEntity] {
-        guard !selectedApp.isEmpty else { return [] }
-        return allDashboards.filter { $0.appName == selectedApp }
+    private var dashboardList: [Dashboard] {
+        return Array(allDashboards)
     }
     
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    Text("Select an app and dashboard to export its configuration, searches, and metadata to a JSON file.")
+                    Text("Select a dashboard to export its configuration, data sources, and visualizations to a JSON file.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } header: {
                     Label("Export Dashboard Details", systemImage: "square.and.arrow.up")
                 }
-                
-                Section("Select App") {
-                    if availableApps.isEmpty {
-                        Text("No apps found. Please sync dashboards first.")
+
+                Section("Select Dashboard") {
+                    if dashboardList.isEmpty {
+                        Text("No dashboards found. Please sync dashboards first.")
                             .foregroundStyle(.secondary)
                     } else {
-                        Picker("App:", selection: $selectedApp) {
-                            Text("Choose an app...").tag("")
-                            ForEach(availableApps, id: \.self) { app in
-                                Text(app).tag(app)
+                        Picker("Dashboard:", selection: $selectedDashboardId) {
+                            Text("Choose a dashboard...").tag(nil as UUID?)
+                            ForEach(dashboardList, id: \.id) { dashboard in
+                                VStack(alignment: .leading) {
+                                    Text(dashboard.title ?? "Untitled Dashboard")
+                                        .font(.body)
+                                    if let description = dashboard.dashboardDescription, !description.isEmpty {
+                                        Text(description)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .tag(dashboard.id as UUID?)
                             }
                         }
                         .pickerStyle(.menu)
-                        .onChange(of: selectedApp) { oldValue, newValue in
-                            // Reset dashboard selection when app changes
-                            selectedDashboardId = ""
+                        .onChange(of: selectedDashboardId) { oldValue, newValue in
                             exportStatus = ""
                         }
                     }
                 }
-                
-                if !selectedApp.isEmpty {
-                    Section("Select Dashboard") {
-                        if dashboardsForSelectedApp.isEmpty {
-                            Text("No dashboards found in this app.")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Picker("Dashboard:", selection: $selectedDashboardId) {
-                                Text("Choose a dashboard...").tag("")
-                                ForEach(dashboardsForSelectedApp, id: \.id) { dashboard in
-                                    VStack(alignment: .leading) {
-                                        Text(dashboard.title ?? dashboard.id)
-                                            .font(.body)
-                                        if let description = dashboard.dashboardDescription, !description.isEmpty {
-                                            Text(description)
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    }
-                                    .tag(dashboard.id)
-                                }
-                            }
-                            .pickerStyle(.menu)
-                            .onChange(of: selectedDashboardId) { oldValue, newValue in
-                                exportStatus = ""
-                            }
-                        }
-                    }
-                }
-                
-                if !selectedDashboardId.isEmpty {
+
+                if selectedDashboardId != nil {
                     Section {
                         Button("Export Dashboard...") {
                             exportDashboard()
@@ -1075,54 +1074,66 @@ struct DashboardExportView: View {
     }
     
     private func exportDashboard() {
-        guard !selectedDashboardId.isEmpty else {
+        guard let dashboardId = selectedDashboardId else {
             exportStatus = "Error: No dashboard selected"
             return
         }
-        
-        guard let dashboard = allDashboards.first(where: { $0.id == selectedDashboardId }) else {
+
+        guard let dashboard = allDashboards.first(where: { $0.id == dashboardId }) else {
             exportStatus = "Error: Dashboard not found"
             return
         }
-        
+
         isExporting = true
         exportStatus = "Preparing export..."
-        
+
         // Create save panel
         let savePanel = NSSavePanel()
         savePanel.title = "Export Dashboard"
         savePanel.message = "Choose where to save the dashboard export"
-        savePanel.nameFieldStringValue = "\(dashboard.id)_export.json"
+        let dashboardName = dashboard.title?.replacingOccurrences(of: " ", with: "_") ?? "dashboard"
+        savePanel.nameFieldStringValue = "\(dashboardName)_export.json"
         savePanel.allowedContentTypes = [.json]
         savePanel.canCreateDirectories = true
         savePanel.begin { [self] response in
             if response == .OK, let url = savePanel.url {
                 Task {
                     do {
-                        // Use the existing exportDashboardAsJSON from DashboardLoader
-                        // This method prints JSON to stdout, so we'll redirect output to file
-                        let loader = DashboardLoader()
-                        
-                        // Create the file first
-                        FileManager.default.createFile(atPath: url.path, contents: nil, attributes: nil)
-                        
-                        // Now we can get a handle to write to it
-                        let fileHandle = try FileHandle(forWritingTo: url)
-                        let originalStdout = dup(fileno(stdout))
-                        let fileDescriptor = fileHandle.fileDescriptor
-                        
-                        // Redirect stdout to file
-                        dup2(fileDescriptor, fileno(stdout))
-                        
-                        // Call the export method (it prints to stdout)
-                        loader.exportDashboardAsJSON(dashboard.id)
-                        
-                        // Restore original stdout
-                        fflush(stdout)
-                        dup2(originalStdout, fileno(stdout))
-                        close(originalStdout)
-                        try fileHandle.close()
-                        
+                        // Create export data structure
+                        var exportData: [String: Any] = [
+                            "id": dashboard.id?.uuidString ?? "unknown",
+                            "title": dashboard.title ?? "Untitled",
+                            "formatType": dashboard.formatType ?? "dashboardStudio",
+                            "createdAt": dashboard.createdAt?.ISO8601Format() ?? "",
+                            "updatedAt": dashboard.updatedAt?.ISO8601Format() ?? ""
+                        ]
+
+                        if let description = dashboard.dashboardDescription {
+                            exportData["description"] = description
+                        }
+
+                        // Include raw JSON if available (contains full Studio configuration)
+                        if let rawJSON = dashboard.rawJSON {
+                            exportData["rawJSON"] = rawJSON
+                        }
+
+                        // Include data sources
+                        if let dataSources = dashboard.dataSources?.allObjects as? [DataSource] {
+                            let dsExport = dataSources.map { ds in
+                                [
+                                    "sourceId": ds.sourceId ?? "",
+                                    "name": ds.name ?? "",
+                                    "type": ds.type ?? "",
+                                    "query": ds.query ?? ""
+                                ]
+                            }
+                            exportData["dataSources"] = dsExport
+                        }
+
+                        // Convert to JSON
+                        let jsonData = try JSONSerialization.data(withJSONObject: exportData, options: [.prettyPrinted, .sortedKeys])
+                        try jsonData.write(to: url)
+
                         await MainActor.run {
                             exportStatus = "Success: Dashboard exported to \(url.lastPathComponent)"
                             isExporting = false
