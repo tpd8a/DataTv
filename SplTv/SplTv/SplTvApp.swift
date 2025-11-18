@@ -8,7 +8,6 @@
 import SwiftUI
 import CoreData
 import DashboardKit
-import d8aTvCore  // Legacy entity support (DashboardEntity, SplunkCredentialManager)
 import UniformTypeIdentifiers
 
 #if os(macOS) || os(tvOS)
@@ -125,8 +124,7 @@ struct SettingsView: View {
     // Dashboard export state
     @State private var showingDashboardExportSheet = false
     
-    // Credential manager
-    private let credentialManager = SplunkCredentialManager()
+    // Credential manager (DashboardKit)
     
     // Core Data context
     @Environment(\.managedObjectContext) private var viewContext
@@ -538,7 +536,7 @@ struct SettingsView: View {
                 // Token authentication
                 do {
                     let serverHost = baseURL.host ?? "localhost"
-                    let token = try credentialManager.retrieveToken(server: serverHost)
+                    let token = try await CredentialManager.shared.retrieveAuthToken(host: serverHost)
                     credentials = .token(token)
                 } catch {
                     // If no token in keychain, use the token field if available
@@ -554,7 +552,7 @@ struct SettingsView: View {
                 // Basic authentication
                 do {
                     let serverHost = baseURL.host ?? "localhost"
-                    let password = try credentialManager.retrieveCredentials(server: serverHost, username: splunkUsername)
+                    let password = try await CredentialManager.shared.retrieveCredentials(host: serverHost, username: splunkUsername)
                     credentials = .basic(username: splunkUsername, password: password)
                 } catch {
                     // If no credentials in keychain, use the password field if available
@@ -604,23 +602,29 @@ struct SettingsView: View {
             connectionTestResult = .failure(message: "Password cannot be empty")
             return
         }
-        
+
         guard let baseURL = URL(string: splunkBaseURL),
               let serverHost = baseURL.host else {
             connectionTestResult = .failure(message: "Invalid base URL")
             return
         }
-        
-        do {
-            try credentialManager.storeCredentials(
-                server: serverHost,
-                username: splunkUsername,
-                password: splunkPassword
-            )
-            connectionTestResult = .success(message: "Password stored securely in Keychain")
-            splunkPassword = "" // Clear the password field
-        } catch {
-            connectionTestResult = .failure(message: "Failed to store password: \(error.localizedDescription)")
+
+        Task {
+            do {
+                try await CredentialManager.shared.storeCredentials(
+                    host: serverHost,
+                    username: splunkUsername,
+                    password: splunkPassword
+                )
+                await MainActor.run {
+                    connectionTestResult = .success(message: "Password stored securely in Keychain")
+                    splunkPassword = "" // Clear the password field
+                }
+            } catch {
+                await MainActor.run {
+                    connectionTestResult = .failure(message: "Failed to store password: \(error.localizedDescription)")
+                }
+            }
         }
     }
     
@@ -630,16 +634,23 @@ struct SettingsView: View {
             connectionTestResult = .failure(message: "Invalid base URL")
             return
         }
-        
-        do {
-            splunkPassword = try credentialManager.retrieveCredentials(
-                server: serverHost,
-                username: splunkUsername
-            )
-            connectionTestResult = .success(message: "Password loaded from Keychain")
-        } catch {
-            splunkPassword = ""
-            connectionTestResult = .failure(message: "No password found in Keychain for this server/username")
+
+        Task {
+            do {
+                let password = try await CredentialManager.shared.retrieveCredentials(
+                    host: serverHost,
+                    username: splunkUsername
+                )
+                await MainActor.run {
+                    splunkPassword = password
+                    connectionTestResult = .success(message: "Password loaded from Keychain")
+                }
+            } catch {
+                await MainActor.run {
+                    splunkPassword = ""
+                    connectionTestResult = .failure(message: "No password found in Keychain for this server/username")
+                }
+            }
         }
     }
     
@@ -648,22 +659,28 @@ struct SettingsView: View {
             connectionTestResult = .failure(message: "Token cannot be empty")
             return
         }
-        
+
         guard let baseURL = URL(string: splunkBaseURL),
               let serverHost = baseURL.host else {
             connectionTestResult = .failure(message: "Invalid base URL")
             return
         }
-        
-        do {
-            try credentialManager.storeToken(
-                server: serverHost,
-                token: splunkToken
-            )
-            connectionTestResult = .success(message: "Token stored securely in Keychain")
-            splunkToken = "" // Clear the token field
-        } catch {
-            connectionTestResult = .failure(message: "Failed to store token: \(error.localizedDescription)")
+
+        Task {
+            do {
+                try await CredentialManager.shared.storeAuthToken(
+                    host: serverHost,
+                    token: splunkToken
+                )
+                await MainActor.run {
+                    connectionTestResult = .success(message: "Token stored securely in Keychain")
+                    splunkToken = "" // Clear the token field
+                }
+            } catch {
+                await MainActor.run {
+                    connectionTestResult = .failure(message: "Failed to store token: \(error.localizedDescription)")
+                }
+            }
         }
     }
     
@@ -673,13 +690,20 @@ struct SettingsView: View {
             connectionTestResult = .failure(message: "Invalid base URL")
             return
         }
-        
-        do {
-            splunkToken = try credentialManager.retrieveToken(server: serverHost)
-            connectionTestResult = .success(message: "Token loaded from Keychain")
-        } catch {
-            splunkToken = ""
-            connectionTestResult = .failure(message: "No token found in Keychain for this server")
+
+        Task {
+            do {
+                let token = try await CredentialManager.shared.retrieveAuthToken(host: serverHost)
+                await MainActor.run {
+                    splunkToken = token
+                    connectionTestResult = .success(message: "Token loaded from Keychain")
+                }
+            } catch {
+                await MainActor.run {
+                    splunkToken = ""
+                    connectionTestResult = .failure(message: "No token found in Keychain for this server")
+                }
+            }
         }
     }
     
@@ -900,78 +924,6 @@ struct SettingsView: View {
         autoStartTimers = false
         showNotifications = true
         logRefreshActivity = true
-    }
-}
-
-// MARK: - SplunkCredentialManager Extension for Token Support
-
-extension SplunkCredentialManager {
-    /// Store a bearer token in the Keychain for a given server
-    func storeToken(server: String, token: String) throws {
-        let account = "token_\(server)" // Use a special prefix to distinguish from username/password
-        
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "SplunkToken",
-            kSecAttrAccount as String: account,
-            kSecValueData as String: token.data(using: .utf8)!
-        ]
-        
-        // Delete any existing token first
-        SecItemDelete(query as CFDictionary)
-        
-        // Add the new token
-        let status = SecItemAdd(query as CFDictionary, nil)
-        
-        guard status == errSecSuccess else {
-            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status), userInfo: [
-                NSLocalizedDescriptionKey: "Failed to store token in Keychain"
-            ])
-        }
-    }
-    
-    /// Retrieve a bearer token from the Keychain for a given server
-    func retrieveToken(server: String) throws -> String {
-        let account = "token_\(server)"
-        
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "SplunkToken",
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true
-        ]
-        
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        
-        guard status == errSecSuccess,
-              let data = result as? Data,
-              let token = String(data: data, encoding: .utf8) else {
-            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status), userInfo: [
-                NSLocalizedDescriptionKey: "Failed to retrieve token from Keychain"
-            ])
-        }
-        
-        return token
-    }
-    
-    /// Delete a bearer token from the Keychain for a given server
-    func deleteToken(server: String) throws {
-        let account = "token_\(server)"
-        
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "SplunkToken",
-            kSecAttrAccount as String: account
-        ]
-        
-        let status = SecItemDelete(query as CFDictionary)
-        
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status), userInfo: [
-                NSLocalizedDescriptionKey: "Failed to delete token from Keychain"
-            ])
-        }
     }
 }
 
