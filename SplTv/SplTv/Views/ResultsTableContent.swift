@@ -363,7 +363,7 @@ struct ResultsTableContent: View {
             print("✅ Found table visualization: \(tableViz.vizId ?? "unknown")")
 
             // Create formatting helper
-            let formatting = VisualizationFormatting(dashboardKitVisualization: tableViz)
+            let formatting = VisualizationFormatting(visualization: tableViz)
             vizFormatting = formatting
 
             // Apply table display options

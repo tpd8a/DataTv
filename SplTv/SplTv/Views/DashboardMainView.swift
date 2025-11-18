@@ -156,23 +156,13 @@ struct DashboardMainView: View {
                     }
 
             case .render:
-                // TODO: Migrate DashboardRenderView to use new Dashboard entity
-                VStack(spacing: 20) {
-                    Image(systemName: "hammer.fill")
-                        .font(.system(size: 60))
-                        .foregroundStyle(.secondary)
-                    Text("Dashboard Rendering")
-                        .font(.title)
-                        .fontWeight(.semibold)
-                    Text("Render mode is being migrated to the new architecture")
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                    Text("Use Monitor mode to view dashboard data sources and results")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .id(dashboard.id)
+                DashboardStudioRenderView(dashboard: dashboard)
+                    .id(dashboard.id)
+                    .toolbar {
+                        ToolbarItemGroup(placement: .automatic) {
+                            renderToolbarButtons
+                        }
+                    }
             }
         } else {
             emptyState

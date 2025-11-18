@@ -8,7 +8,6 @@
 import SwiftUI
 import CoreData
 import DashboardKit
-import d8aTvCore  // Legacy entity support (DashboardEntity, SplunkCredentialManager)
 import UniformTypeIdentifiers
 
 #if os(macOS) || os(tvOS)
@@ -125,8 +124,7 @@ struct SettingsView: View {
     // Dashboard export state
     @State private var showingDashboardExportSheet = false
     
-    // Credential manager
-    private let credentialManager = SplunkCredentialManager()
+    // Credential manager (DashboardKit)
     
     // Core Data context
     @Environment(\.managedObjectContext) private var viewContext
@@ -538,7 +536,7 @@ struct SettingsView: View {
                 // Token authentication
                 do {
                     let serverHost = baseURL.host ?? "localhost"
-                    let token = try credentialManager.retrieveToken(server: serverHost)
+                    let token = try await CredentialManager.shared.retrieveAuthToken(host: serverHost)
                     credentials = .token(token)
                 } catch {
                     // If no token in keychain, use the token field if available
@@ -554,7 +552,7 @@ struct SettingsView: View {
                 // Basic authentication
                 do {
                     let serverHost = baseURL.host ?? "localhost"
-                    let password = try credentialManager.retrieveCredentials(server: serverHost, username: splunkUsername)
+                    let password = try await CredentialManager.shared.retrieveCredentials(host: serverHost, username: splunkUsername)
                     credentials = .basic(username: splunkUsername, password: password)
                 } catch {
                     // If no credentials in keychain, use the password field if available
@@ -604,23 +602,29 @@ struct SettingsView: View {
             connectionTestResult = .failure(message: "Password cannot be empty")
             return
         }
-        
+
         guard let baseURL = URL(string: splunkBaseURL),
               let serverHost = baseURL.host else {
             connectionTestResult = .failure(message: "Invalid base URL")
             return
         }
-        
-        do {
-            try credentialManager.storeCredentials(
-                server: serverHost,
-                username: splunkUsername,
-                password: splunkPassword
-            )
-            connectionTestResult = .success(message: "Password stored securely in Keychain")
-            splunkPassword = "" // Clear the password field
-        } catch {
-            connectionTestResult = .failure(message: "Failed to store password: \(error.localizedDescription)")
+
+        Task {
+            do {
+                try await CredentialManager.shared.storeCredentials(
+                    host: serverHost,
+                    username: splunkUsername,
+                    password: splunkPassword
+                )
+                await MainActor.run {
+                    connectionTestResult = .success(message: "Password stored securely in Keychain")
+                    splunkPassword = "" // Clear the password field
+                }
+            } catch {
+                await MainActor.run {
+                    connectionTestResult = .failure(message: "Failed to store password: \(error.localizedDescription)")
+                }
+            }
         }
     }
     
@@ -630,16 +634,23 @@ struct SettingsView: View {
             connectionTestResult = .failure(message: "Invalid base URL")
             return
         }
-        
-        do {
-            splunkPassword = try credentialManager.retrieveCredentials(
-                server: serverHost,
-                username: splunkUsername
-            )
-            connectionTestResult = .success(message: "Password loaded from Keychain")
-        } catch {
-            splunkPassword = ""
-            connectionTestResult = .failure(message: "No password found in Keychain for this server/username")
+
+        Task {
+            do {
+                let password = try await CredentialManager.shared.retrieveCredentials(
+                    host: serverHost,
+                    username: splunkUsername
+                )
+                await MainActor.run {
+                    splunkPassword = password
+                    connectionTestResult = .success(message: "Password loaded from Keychain")
+                }
+            } catch {
+                await MainActor.run {
+                    splunkPassword = ""
+                    connectionTestResult = .failure(message: "No password found in Keychain for this server/username")
+                }
+            }
         }
     }
     
@@ -648,22 +659,28 @@ struct SettingsView: View {
             connectionTestResult = .failure(message: "Token cannot be empty")
             return
         }
-        
+
         guard let baseURL = URL(string: splunkBaseURL),
               let serverHost = baseURL.host else {
             connectionTestResult = .failure(message: "Invalid base URL")
             return
         }
-        
-        do {
-            try credentialManager.storeToken(
-                server: serverHost,
-                token: splunkToken
-            )
-            connectionTestResult = .success(message: "Token stored securely in Keychain")
-            splunkToken = "" // Clear the token field
-        } catch {
-            connectionTestResult = .failure(message: "Failed to store token: \(error.localizedDescription)")
+
+        Task {
+            do {
+                try await CredentialManager.shared.storeAuthToken(
+                    host: serverHost,
+                    token: splunkToken
+                )
+                await MainActor.run {
+                    connectionTestResult = .success(message: "Token stored securely in Keychain")
+                    splunkToken = "" // Clear the token field
+                }
+            } catch {
+                await MainActor.run {
+                    connectionTestResult = .failure(message: "Failed to store token: \(error.localizedDescription)")
+                }
+            }
         }
     }
     
@@ -673,13 +690,20 @@ struct SettingsView: View {
             connectionTestResult = .failure(message: "Invalid base URL")
             return
         }
-        
-        do {
-            splunkToken = try credentialManager.retrieveToken(server: serverHost)
-            connectionTestResult = .success(message: "Token loaded from Keychain")
-        } catch {
-            splunkToken = ""
-            connectionTestResult = .failure(message: "No token found in Keychain for this server")
+
+        Task {
+            do {
+                let token = try await CredentialManager.shared.retrieveAuthToken(host: serverHost)
+                await MainActor.run {
+                    splunkToken = token
+                    connectionTestResult = .success(message: "Token loaded from Keychain")
+                }
+            } catch {
+                await MainActor.run {
+                    splunkToken = ""
+                    connectionTestResult = .failure(message: "No token found in Keychain for this server")
+                }
+            }
         }
     }
     
@@ -787,7 +811,8 @@ struct SettingsView: View {
     }
 
     private func updateDashboardCount() {
-        let fetchRequest: NSFetchRequest<DashboardEntity> = DashboardEntity.fetchRequest()
+        // Use new Dashboard entity from DashboardKit
+        let fetchRequest: NSFetchRequest<Dashboard> = Dashboard.fetchRequest()
         do {
             dashboardCount = try viewContext.count(for: fetchRequest)
         } catch {
@@ -797,14 +822,67 @@ struct SettingsView: View {
     }
     
     private func calculateCoreDataSize() {
-        // TODO: Add public API to DashboardManager to get store size
-        coreDataSize = "Size calculation not available"
+        // Use persistenceController (which uses DashboardKit model)
+        guard let storeURL = persistenceController.container.persistentStoreCoordinator.persistentStores.first?.url else {
+            coreDataSize = "Unable to determine size"
+            return
+        }
+
+        do {
+            let attributes = try FileManager.default.attributesOfItem(atPath: storeURL.path)
+            if let fileSize = attributes[FileAttributeKey.size] as? UInt64 {
+                let formatter = ByteCountFormatter()
+                formatter.countStyle = .file
+                coreDataSize = formatter.string(fromByteCount: Int64(fileSize))
+            } else {
+                coreDataSize = "Unknown size"
+            }
+        } catch {
+            coreDataSize = "Error: \(error.localizedDescription)"
+        }
     }
 
     private func clearAllCoreData() {
-        // TODO: Implement clearAllData() method in DashboardKit.CoreDataManager
-        // For now, just show a message
-        connectionTestResult = .failure(message: "Clear all data not yet implemented")
+        let context = persistenceController.context
+
+        // Delete all DashboardKit entities
+        let entityNames = [
+            "Dashboard",
+            "DataSource",
+            "SearchExecution",
+            "SearchResult",
+            "Visualization",
+            "DashboardInput",
+            "DashboardLayout",
+            "LayoutItem",
+            "DataSourceConfig"
+        ]
+
+        do {
+            for entityName in entityNames {
+                let fetchRequest = NSFetchRequest<NSFetchRequestResult>(entityName: entityName)
+                let deleteRequest = NSBatchDeleteRequest(fetchRequest: fetchRequest)
+                deleteRequest.resultType = .resultTypeObjectIDs
+
+                let result = try context.execute(deleteRequest) as? NSBatchDeleteResult
+                if let objectIDArray = result?.result as? [NSManagedObjectID] {
+                    let changes = [NSDeletedObjectsKey: objectIDArray]
+                    NSManagedObjectContext.mergeChanges(fromRemoteContextSave: changes, into: [context])
+                }
+            }
+
+            try context.save()
+
+            // Update UI
+            updateDashboardCount()
+            calculateCoreDataSize()
+
+            // Show success message
+            connectionTestResult = .success(message: "All data cleared successfully")
+        } catch {
+            print("❌ Failed to clear CoreData: \(error)")
+            connectionTestResult = .failure(message: "Failed to clear data: \(error.localizedDescription)")
+        }
     }
     
     private func showDashboardExportPanel() {
@@ -849,167 +927,66 @@ struct SettingsView: View {
     }
 }
 
-// MARK: - SplunkCredentialManager Extension for Token Support
-
-extension SplunkCredentialManager {
-    /// Store a bearer token in the Keychain for a given server
-    func storeToken(server: String, token: String) throws {
-        let account = "token_\(server)" // Use a special prefix to distinguish from username/password
-        
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "SplunkToken",
-            kSecAttrAccount as String: account,
-            kSecValueData as String: token.data(using: .utf8)!
-        ]
-        
-        // Delete any existing token first
-        SecItemDelete(query as CFDictionary)
-        
-        // Add the new token
-        let status = SecItemAdd(query as CFDictionary, nil)
-        
-        guard status == errSecSuccess else {
-            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status), userInfo: [
-                NSLocalizedDescriptionKey: "Failed to store token in Keychain"
-            ])
-        }
-    }
-    
-    /// Retrieve a bearer token from the Keychain for a given server
-    func retrieveToken(server: String) throws -> String {
-        let account = "token_\(server)"
-        
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "SplunkToken",
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true
-        ]
-        
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        
-        guard status == errSecSuccess,
-              let data = result as? Data,
-              let token = String(data: data, encoding: .utf8) else {
-            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status), userInfo: [
-                NSLocalizedDescriptionKey: "Failed to retrieve token from Keychain"
-            ])
-        }
-        
-        return token
-    }
-    
-    /// Delete a bearer token from the Keychain for a given server
-    func deleteToken(server: String) throws {
-        let account = "token_\(server)"
-        
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "SplunkToken",
-            kSecAttrAccount as String: account
-        ]
-        
-        let status = SecItemDelete(query as CFDictionary)
-        
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status), userInfo: [
-                NSLocalizedDescriptionKey: "Failed to delete token from Keychain"
-            ])
-        }
-    }
-}
-
 // MARK: - Dashboard Export View
 
 struct DashboardExportView: View {
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.dismiss) private var dismiss
-    
-    // Fetch all apps
+
+    // Fetch all dashboards using new Dashboard entity from DashboardKit
     @FetchRequest(
-        sortDescriptors: [NSSortDescriptor(keyPath: \DashboardEntity.appName, ascending: true)],
+        sortDescriptors: [NSSortDescriptor(keyPath: \Dashboard.title, ascending: true)],
         animation: .default)
-    private var allDashboards: FetchedResults<DashboardEntity>
-    
-    @State private var selectedApp: String = ""
-    @State private var selectedDashboardId: String = ""
+    private var allDashboards: FetchedResults<Dashboard>
+
+    @State private var selectedDashboardId: UUID? = nil
     @State private var exportStatus: String = ""
     @State private var isExporting = false
-    
+
     // Computed properties
-    private var availableApps: [String] {
-        let apps = Set(allDashboards.compactMap { $0.appName })
-        return Array(apps).sorted()
-    }
-    
-    private var dashboardsForSelectedApp: [DashboardEntity] {
-        guard !selectedApp.isEmpty else { return [] }
-        return allDashboards.filter { $0.appName == selectedApp }
+    private var dashboardList: [Dashboard] {
+        return Array(allDashboards)
     }
     
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    Text("Select an app and dashboard to export its configuration, searches, and metadata to a JSON file.")
+                    Text("Select a dashboard to export its configuration, data sources, and visualizations to a JSON file.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } header: {
                     Label("Export Dashboard Details", systemImage: "square.and.arrow.up")
                 }
-                
-                Section("Select App") {
-                    if availableApps.isEmpty {
-                        Text("No apps found. Please sync dashboards first.")
+
+                Section("Select Dashboard") {
+                    if dashboardList.isEmpty {
+                        Text("No dashboards found. Please sync dashboards first.")
                             .foregroundStyle(.secondary)
                     } else {
-                        Picker("App:", selection: $selectedApp) {
-                            Text("Choose an app...").tag("")
-                            ForEach(availableApps, id: \.self) { app in
-                                Text(app).tag(app)
+                        Picker("Dashboard:", selection: $selectedDashboardId) {
+                            Text("Choose a dashboard...").tag(nil as UUID?)
+                            ForEach(dashboardList, id: \.id) { dashboard in
+                                VStack(alignment: .leading) {
+                                    Text(dashboard.title ?? "Untitled Dashboard")
+                                        .font(.body)
+                                    if let description = dashboard.dashboardDescription, !description.isEmpty {
+                                        Text(description)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .tag(dashboard.id as UUID?)
                             }
                         }
                         .pickerStyle(.menu)
-                        .onChange(of: selectedApp) { oldValue, newValue in
-                            // Reset dashboard selection when app changes
-                            selectedDashboardId = ""
+                        .onChange(of: selectedDashboardId) { oldValue, newValue in
                             exportStatus = ""
                         }
                     }
                 }
-                
-                if !selectedApp.isEmpty {
-                    Section("Select Dashboard") {
-                        if dashboardsForSelectedApp.isEmpty {
-                            Text("No dashboards found in this app.")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Picker("Dashboard:", selection: $selectedDashboardId) {
-                                Text("Choose a dashboard...").tag("")
-                                ForEach(dashboardsForSelectedApp, id: \.id) { dashboard in
-                                    VStack(alignment: .leading) {
-                                        Text(dashboard.title ?? dashboard.id)
-                                            .font(.body)
-                                        if let description = dashboard.dashboardDescription, !description.isEmpty {
-                                            Text(description)
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    }
-                                    .tag(dashboard.id)
-                                }
-                            }
-                            .pickerStyle(.menu)
-                            .onChange(of: selectedDashboardId) { oldValue, newValue in
-                                exportStatus = ""
-                            }
-                        }
-                    }
-                }
-                
-                if !selectedDashboardId.isEmpty {
+
+                if selectedDashboardId != nil {
                     Section {
                         Button("Export Dashboard...") {
                             exportDashboard()
@@ -1049,54 +1026,66 @@ struct DashboardExportView: View {
     }
     
     private func exportDashboard() {
-        guard !selectedDashboardId.isEmpty else {
+        guard let dashboardId = selectedDashboardId else {
             exportStatus = "Error: No dashboard selected"
             return
         }
-        
-        guard let dashboard = allDashboards.first(where: { $0.id == selectedDashboardId }) else {
+
+        guard let dashboard = allDashboards.first(where: { $0.id == dashboardId }) else {
             exportStatus = "Error: Dashboard not found"
             return
         }
-        
+
         isExporting = true
         exportStatus = "Preparing export..."
-        
+
         // Create save panel
         let savePanel = NSSavePanel()
         savePanel.title = "Export Dashboard"
         savePanel.message = "Choose where to save the dashboard export"
-        savePanel.nameFieldStringValue = "\(dashboard.id)_export.json"
+        let dashboardName = dashboard.title?.replacingOccurrences(of: " ", with: "_") ?? "dashboard"
+        savePanel.nameFieldStringValue = "\(dashboardName)_export.json"
         savePanel.allowedContentTypes = [.json]
         savePanel.canCreateDirectories = true
         savePanel.begin { [self] response in
             if response == .OK, let url = savePanel.url {
                 Task {
                     do {
-                        // Use the existing exportDashboardAsJSON from DashboardLoader
-                        // This method prints JSON to stdout, so we'll redirect output to file
-                        let loader = DashboardLoader()
-                        
-                        // Create the file first
-                        FileManager.default.createFile(atPath: url.path, contents: nil, attributes: nil)
-                        
-                        // Now we can get a handle to write to it
-                        let fileHandle = try FileHandle(forWritingTo: url)
-                        let originalStdout = dup(fileno(stdout))
-                        let fileDescriptor = fileHandle.fileDescriptor
-                        
-                        // Redirect stdout to file
-                        dup2(fileDescriptor, fileno(stdout))
-                        
-                        // Call the export method (it prints to stdout)
-                        loader.exportDashboardAsJSON(dashboard.id)
-                        
-                        // Restore original stdout
-                        fflush(stdout)
-                        dup2(originalStdout, fileno(stdout))
-                        close(originalStdout)
-                        try fileHandle.close()
-                        
+                        // Create export data structure
+                        var exportData: [String: Any] = [
+                            "id": dashboard.id?.uuidString ?? "unknown",
+                            "title": dashboard.title ?? "Untitled",
+                            "formatType": dashboard.formatType ?? "dashboardStudio",
+                            "createdAt": dashboard.createdAt?.ISO8601Format() ?? "",
+                            "updatedAt": dashboard.updatedAt?.ISO8601Format() ?? ""
+                        ]
+
+                        if let description = dashboard.dashboardDescription {
+                            exportData["description"] = description
+                        }
+
+                        // Include raw JSON if available (contains full Studio configuration)
+                        if let rawJSON = dashboard.rawJSON {
+                            exportData["rawJSON"] = rawJSON
+                        }
+
+                        // Include data sources
+                        if let dataSources = dashboard.dataSources?.allObjects as? [DataSource] {
+                            let dsExport = dataSources.map { ds in
+                                [
+                                    "sourceId": ds.sourceId ?? "",
+                                    "name": ds.name ?? "",
+                                    "type": ds.type ?? "",
+                                    "query": ds.query ?? ""
+                                ]
+                            }
+                            exportData["dataSources"] = dsExport
+                        }
+
+                        // Convert to JSON
+                        let jsonData = try JSONSerialization.data(withJSONObject: exportData, options: [.prettyPrinted, .sortedKeys])
+                        try jsonData.write(to: url)
+
                         await MainActor.run {
                             exportStatus = "Success: Dashboard exported to \(url.lastPathComponent)"
                             isExporting = false
