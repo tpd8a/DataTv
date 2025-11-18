@@ -841,7 +841,7 @@ struct SettingsView: View {
             coreDataSize = "Error: \(error.localizedDescription)"
         }
     }
-    
+
     private func clearAllCoreData() {
         let context = persistenceController.context
 

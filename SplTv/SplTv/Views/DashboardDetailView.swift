@@ -90,11 +90,13 @@ struct DashboardDetailView: View {
             Text("Search Results")
                 .font(.headline)
 
-            if let dataSourceId = selectedDataSourceId,
-               let dashboardId = dashboard.id?.uuidString {
+            if let selectedSourceId = selectedDataSourceId,
+               let dashboardId = dashboard.id,
+               let dataSource = getDataSources().first(where: { $0.sourceId == selectedSourceId }),
+               let dataSourceId = dataSource.id {
                 SearchResultsTableView(
                     dashboardId: dashboardId,
-                    searchId: dataSourceId
+                    dataSourceId: dataSourceId
                 )
                 .id("\(dashboardId)-\(dataSourceId)")
             } else {
