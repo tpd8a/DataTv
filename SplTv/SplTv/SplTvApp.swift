@@ -1087,11 +1087,36 @@ struct DashboardExportView: View {
         isExporting = true
         exportStatus = "Preparing export..."
 
+        // Extract all data from Core Data BEFORE async operations
+        // Core Data objects are not thread-safe and must be accessed from their context
+        let exportId = dashboard.id?.uuidString ?? "unknown"
+        let exportTitle = dashboard.title ?? "Untitled"
+        let exportFormatType = dashboard.formatType ?? "dashboardStudio"
+        let exportCreatedAt = dashboard.createdAt?.ISO8601Format() ?? ""
+        let exportUpdatedAt = dashboard.updatedAt?.ISO8601Format() ?? ""
+        let exportDescription = dashboard.dashboardDescription
+        let exportRawJSON = dashboard.rawJSON
+
+        // Extract data sources
+        let exportDataSources: [[String: String]]? = {
+            if let dataSources = dashboard.dataSources?.allObjects as? [DataSource] {
+                return dataSources.map { ds in
+                    [
+                        "sourceId": ds.sourceId ?? "",
+                        "name": ds.name ?? "",
+                        "type": ds.type ?? "",
+                        "query": ds.query ?? ""
+                    ]
+                }
+            }
+            return nil
+        }()
+
         // Create save panel
         let savePanel = NSSavePanel()
         savePanel.title = "Export Dashboard"
         savePanel.message = "Choose where to save the dashboard export"
-        let dashboardName = dashboard.title?.replacingOccurrences(of: " ", with: "_") ?? "dashboard"
+        let dashboardName = exportTitle.replacingOccurrences(of: " ", with: "_")
         savePanel.nameFieldStringValue = "\(dashboardName)_export.json"
         savePanel.allowedContentTypes = [.json]
         savePanel.canCreateDirectories = true
@@ -1099,35 +1124,25 @@ struct DashboardExportView: View {
             if response == .OK, let url = savePanel.url {
                 Task { @MainActor in
                     do {
-                        // Create export data structure
+                        // Create export data structure using pre-extracted data
                         var exportData: [String: Any] = [
-                            "id": dashboard.id?.uuidString ?? "unknown",
-                            "title": dashboard.title ?? "Untitled",
-                            "formatType": dashboard.formatType ?? "dashboardStudio",
-                            "createdAt": dashboard.createdAt?.ISO8601Format() ?? "",
-                            "updatedAt": dashboard.updatedAt?.ISO8601Format() ?? ""
+                            "id": exportId,
+                            "title": exportTitle,
+                            "formatType": exportFormatType,
+                            "createdAt": exportCreatedAt,
+                            "updatedAt": exportUpdatedAt
                         ]
 
-                        if let description = dashboard.dashboardDescription {
+                        if let description = exportDescription {
                             exportData["description"] = description
                         }
 
-                        // Include raw JSON if available (contains full Studio configuration)
-                        if let rawJSON = dashboard.rawJSON {
+                        if let rawJSON = exportRawJSON {
                             exportData["rawJSON"] = rawJSON
                         }
 
-                        // Include data sources
-                        if let dataSources = dashboard.dataSources?.allObjects as? [DataSource] {
-                            let dsExport = dataSources.map { ds in
-                                [
-                                    "sourceId": ds.sourceId ?? "",
-                                    "name": ds.name ?? "",
-                                    "type": ds.type ?? "",
-                                    "query": ds.query ?? ""
-                                ]
-                            }
-                            exportData["dataSources"] = dsExport
+                        if let dataSources = exportDataSources {
+                            exportData["dataSources"] = dataSources
                         }
 
                         // Convert to JSON
