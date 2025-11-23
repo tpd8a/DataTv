@@ -810,9 +810,9 @@ public class DashboardLoader {
     public func loadDashboardAsStudio(xmlContent: String, dashboardId: String, appName: String? = nil) throws {
         print("🔄 Loading dashboard '\(dashboardId)' as Studio format...")
 
-        // Parse XML to generic element tree for version checking
-        let genericParser = GenericXMLParser()
-        let root = try genericParser.parse(xmlString: xmlContent)
+        // Parse XML
+        let parser = SimpleXMLParser()
+        let root = try parser.parse(xmlString: xmlContent)
 
         // Validate it's a dashboard
         guard root.name == "dashboard" || root.name == "form" else {
@@ -828,9 +828,7 @@ public class DashboardLoader {
         } else {
             // SimpleXML format - convert to Studio format
             print("📄 Detected SimpleXML format - converting to Studio format")
-            // Use DashboardKit's SimpleXMLParser which properly extracts format elements
-            let dashboardParser = SimpleXMLParser()
-            let simpleXMLConfig = try dashboardParser.parse(xmlContent)
+            let simpleXMLConfig = try parseToSimpleXMLConfig(root: root)
             let converter = DashboardConverter()
             studioConfig = converter.convertToStudio(simpleXMLConfig)
         }
