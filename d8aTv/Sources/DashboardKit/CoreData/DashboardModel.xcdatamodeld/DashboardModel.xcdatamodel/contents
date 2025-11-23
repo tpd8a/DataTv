@@ -30,6 +30,8 @@
         <attribute name="refreshType" optional="YES" attributeType="String"/>
         <attribute name="optionsJSON" optional="YES" attributeType="String"/>
         <attribute name="extendsId" optional="YES" attributeType="String"/>
+        <attribute name="owner" optional="YES" attributeType="String"/>
+        <attribute name="app" optional="YES" attributeType="String"/>
         <relationship name="dashboard" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Dashboard" inverseName="dataSources" inverseEntity="Dashboard"/>
         <relationship name="executions" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="SearchExecution" inverseName="dataSource" inverseEntity="SearchExecution"/>
         <relationship name="visualizations" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Visualization" inverseName="dataSource" inverseEntity="Visualization"/>

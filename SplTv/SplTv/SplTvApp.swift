@@ -34,9 +34,8 @@ struct SplTvApp: App {
         .commands {
             // Add custom menu commands
             CommandGroup(replacing: .newItem) { }
-            
-            // Refresh timer commands disabled until DashboardRefreshWorker migrated
-            /*
+
+            // Refresh timer commands
             CommandGroup(after: .toolbar) {
                 Button("Start All Timers") {
                     DashboardRefreshWorker.shared.startAllRefreshTimers()
@@ -50,7 +49,6 @@ struct SplTvApp: App {
 
                 Divider()
             }
-            */
         }
         
         Settings {
@@ -516,84 +514,80 @@ struct SettingsView: View {
     }
     
     // MARK: - Helper Functions
-    
+
     private func testSplunkConnection() async {
         isTestingConnection = true
         connectionTestResult = nil
-        
+
         do {
             // Validate URL
-            guard let baseURL = URL(string: splunkBaseURL) else {
+            guard let baseURL = URL(string: splunkBaseURL),
+                  let host = baseURL.host else {
                 connectionTestResult = .failure(message: "Invalid URL format")
                 isTestingConnection = false
                 return
             }
-            
-            // Try to get credentials from keychain based on auth type
+
+            let port = baseURL.port ?? 8089
+            let useSSL = baseURL.scheme == "https"
+
+            // Get credentials
             let credentials: SplunkCredentials
-            
             if splunkAuthType == "token" {
-                // Token authentication
+                let authToken: String
                 do {
-                    let serverHost = baseURL.host ?? "localhost"
-                    let token = try await CredentialManager.shared.retrieveAuthToken(host: serverHost)
-                    credentials = .token(token)
+                    authToken = try await CredentialManager.shared.retrieveAuthToken(host: host)
                 } catch {
-                    // If no token in keychain, use the token field if available
                     if !splunkToken.isEmpty {
-                        credentials = .token(splunkToken)
+                        authToken = splunkToken
                     } else {
                         connectionTestResult = .failure(message: "No token found. Please enter and store a token first.")
                         isTestingConnection = false
                         return
                     }
                 }
+                credentials = .token(authToken)
             } else {
-                // Basic authentication
+                let password: String
                 do {
-                    let serverHost = baseURL.host ?? "localhost"
-                    let password = try await CredentialManager.shared.retrieveCredentials(host: serverHost, username: splunkUsername)
-                    credentials = .basic(username: splunkUsername, password: password)
+                    password = try await CredentialManager.shared.retrieveCredentials(host: host, username: splunkUsername)
                 } catch {
-                    // If no credentials in keychain, use the password field if available
                     if !splunkPassword.isEmpty {
-                        credentials = .basic(username: splunkUsername, password: splunkPassword)
+                        password = splunkPassword
                     } else {
                         connectionTestResult = .failure(message: "No password found. Please enter and store a password first.")
                         isTestingConnection = false
                         return
                     }
                 }
+                credentials = .basic(username: splunkUsername, password: password)
             }
-            
-            // Create configuration
+
+            // Create configuration and auth service
             let config = SplunkConfiguration(
                 baseURL: baseURL,
                 credentials: credentials,
-                defaultApp: splunkDefaultApp,
-                defaultOwner: splunkDefaultOwner,
                 timeout: splunkTimeout,
-                maxRetries: splunkMaxRetries,
-                retryDelay: splunkRetryDelay,
                 allowInsecureConnections: splunkAllowInsecure,
                 validateSSLCertificate: splunkValidateSSL
             )
-            
-            // Create REST client and test connectivity
+
             let restClient = SplunkRestClient(configuration: config)
-            
-            do {
-                try await restClient.testConnectivity()
+            let authService = SplunkAuthenticationService(restClient: restClient)
+
+            // Verify credentials
+            let isValid = try await authService.verifyCredentials()
+
+            if isValid {
                 let authTypeDisplay = splunkAuthType == "token" ? "token" : "username/password"
-                connectionTestResult = .success(message: "Successfully connected to \(baseURL.host ?? splunkBaseURL) using \(authTypeDisplay)")
-            } catch {
-                connectionTestResult = .failure(message: "Connection failed: \(error.localizedDescription)")
+                connectionTestResult = .success(message: "Successfully connected to \(host):\(port) using \(authTypeDisplay)")
+            } else {
+                connectionTestResult = .failure(message: "Authentication failed - check credentials")
             }
-            
         } catch {
-            connectionTestResult = .failure(message: "Error: \(error.localizedDescription)")
+            connectionTestResult = .failure(message: "Connection failed: \(error.localizedDescription)")
         }
-        
+
         isTestingConnection = false
     }
     
@@ -710,103 +704,221 @@ struct SettingsView: View {
     private func syncDashboards() async {
         isSyncing = true
         syncResult = nil
-        
+
         do {
             // Validate URL
-            guard let baseURL = URL(string: splunkBaseURL) else {
+            guard let baseURL = URL(string: splunkBaseURL),
+                  let host = baseURL.host else {
                 syncResult = .failure(message: "Invalid URL format")
                 isSyncing = false
                 return
             }
-            
-            // Try to get credentials from keychain based on auth type
+
+            // Create credentials
             let credentials: SplunkCredentials
-            
             if splunkAuthType == "token" {
+                let authToken: String
                 do {
-                    let serverHost = baseURL.host ?? "localhost"
-                    let token = try credentialManager.retrieveToken(server: serverHost)
-                    credentials = .token(token)
+                    authToken = try await CredentialManager.shared.retrieveAuthToken(host: host)
                 } catch {
                     syncResult = .failure(message: "No token found. Please store a token first.")
                     isSyncing = false
                     return
                 }
+                credentials = .token(authToken)
             } else {
+                let password: String
                 do {
-                    let serverHost = baseURL.host ?? "localhost"
-                    let password = try credentialManager.retrieveCredentials(server: serverHost, username: splunkUsername)
-                    credentials = .basic(username: splunkUsername, password: password)
+                    password = try await CredentialManager.shared.retrieveCredentials(host: host, username: splunkUsername)
                 } catch {
-                    syncResult = .failure(message: "No credentials found. Please store password first.")
+                    syncResult = .failure(message: "No password found. Please store password first.")
                     isSyncing = false
                     return
                 }
+                credentials = .basic(username: splunkUsername, password: password)
             }
-            
-            // Create configuration
+
+            // Create Splunk configuration
             let config = SplunkConfiguration(
                 baseURL: baseURL,
                 credentials: credentials,
                 defaultApp: splunkDefaultApp,
                 defaultOwner: splunkDefaultOwner,
                 timeout: splunkTimeout,
-                maxRetries: splunkMaxRetries,
-                retryDelay: splunkRetryDelay,
                 allowInsecureConnections: splunkAllowInsecure,
                 validateSSLCertificate: splunkValidateSSL
             )
-            
+
             // Create REST client and dashboard service
             let restClient = SplunkRestClient(configuration: config)
             let dashboardService = SplunkDashboardService(restClient: restClient)
-            
-            // Fetch dashboards from Splunk
-            do {
-                let dashboardList = try await dashboardService.listDashboards(
-                    owner: splunkDefaultOwner, app: splunkDefaultApp
-                )
-                
-                var syncedCount = 0
-                let maxToSync = min(dashboardList.entry.count, syncMaxDashboards)
-                
-                // Load each dashboard and store in Core Data
-                for dashboard in dashboardList.entry.prefix(maxToSync) {
-                    // Apply filters - check author instead of owner
-                    if !syncIncludePrivate && dashboard.author != splunkDefaultOwner {
-                        continue
-                    }
-                    
-                    // The XML content is already in the dashboard's content.eaiData
-                    let xmlContent = dashboard.content.eaiData
-                    
-                    // Parse and load into Core Data using DashboardLoader
-                    let loader = DashboardLoader()
-                    do {
-                        try loader.loadDashboard(
-                            xmlContent: xmlContent,
-                            dashboardId: dashboard.name,
-                            appName: splunkDefaultApp
-                        )
-                        syncedCount += 1
-                    } catch {
-                        print("⚠️ Failed to load dashboard '\(dashboard.name)': \(error.localizedDescription)")
-                    }
-                }
-                
-                // Update statistics
-                await MainActor.run {
-                    lastSyncDate = Date()
-                    updateDashboardCount()
-                }
-                
-                syncResult = .success(message: "Synced \(syncedCount) of \(maxToSync) dashboards from '\(splunkDefaultApp)' app")
-            } catch {
-                syncResult = .failure(message: "Sync failed: \(error.localizedDescription)")
+
+            // Create or get DataSourceConfig for this Splunk instance
+            let manager = CoreDataManager.shared
+            let port = baseURL.port ?? 8089
+            // Extract auth token for storage (only if using token auth)
+            let authTokenForStorage: String?
+            if case .token(let token) = credentials {
+                authTokenForStorage = token
+            } else {
+                authTokenForStorage = nil
             }
-            
+            let dataSourceConfigId = try await manager.saveDataSourceConfig(
+                name: "Splunk - \(host)",
+                type: .splunk,
+                host: host,
+                port: port,
+                authToken: authTokenForStorage,
+                isDefault: true
+            )
+
+            // Register SplunkDataSource with CoreDataManager using the same configuration
+            // This preserves all credentials (token or basic auth) for the metadata fetch
+            let splunkDataSource = SplunkDataSource(configuration: config)
+            await manager.registerDataSource(splunkDataSource, withId: dataSourceConfigId.uuidString)
+
+            print("🔄 Fetching dashboards using filtered search from app: \(splunkDefaultApp)")
+            let dashboardListResponse = try await dashboardService.listDashboards(
+                owner: splunkDefaultOwner,
+                app: splunkDefaultApp
+            )
+
+            let dashboardList = dashboardListResponse.entry
+
+            var syncedCount = 0
+            let maxToSync = max(0, min(dashboardList.count, syncMaxDashboards))
+
+            let startMsg = "🔵 SYNC START: \(dashboardList.count) dashboards (filtered), syncMaxDashboards=\(syncMaxDashboards), maxToSync=\(maxToSync)\n"
+            try? startMsg.data(using: .utf8)?.write(to: URL(fileURLWithPath: "/tmp/sync_debug.log"), options: .atomic)
+
+            guard maxToSync > 0 else {
+                syncResult = .failure(message: "No dashboards to sync (maxToSync=\(maxToSync), syncMaxDashboards=\(syncMaxDashboards))")
+                isSyncing = false
+                return
+            }
+
+            // Process each dashboard
+            for entry in dashboardList.prefix(maxToSync) {
+                let entryMsg = "📋 Processing '\(entry.name)' by '\(entry.author)'\n"
+                if let data = entryMsg.data(using: .utf8),
+                   let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: "/tmp/sync_debug.log")) {
+                    handle.seekToEndOfFile()
+                    handle.write(data)
+                    try? handle.close()
+                }
+
+                // Apply author filter if needed
+                if !syncIncludePrivate && entry.author != splunkDefaultOwner {
+                    let skipMsg = "⏭️  Skipped (author filter)\n"
+                    if let data = skipMsg.data(using: .utf8),
+                       let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: "/tmp/sync_debug.log")) {
+                        handle.seekToEndOfFile()
+                        handle.write(data)
+                        try? handle.close()
+                    }
+                    continue
+                }
+
+                // Get the dashboard XML content
+                let dashboardXML = entry.content.eaiData
+                guard !dashboardXML.isEmpty else {
+                    let noDataMsg = "⏭️  Skipped (no eaiData)\n"
+                    if let data = noDataMsg.data(using: .utf8),
+                       let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: "/tmp/sync_debug.log")) {
+                        handle.seekToEndOfFile()
+                        handle.write(data)
+                        try? handle.close()
+                    }
+                    continue
+                }
+
+                // Determine dashboard format by checking the XML content
+                let formatType: String
+                if dashboardXML.contains("<dashboard version=\"2") {
+                    // Dashboard Studio 2.x format (XML-based)
+                    formatType = "dashboardStudio"
+                } else if dashboardXML.contains("<form") || dashboardXML.contains("<dashboard version=\"1") {
+                    // SimpleXML format (legacy)
+                    formatType = "simpleXML"
+                } else {
+                    // Fallback: assume SimpleXML
+                    formatType = "simpleXML"
+                }
+                print("🔵 formatType: \(formatType) for '\(entry.name)'")
+                // Save to CoreData using CoreDataManager
+                do {
+                    if formatType == "dashboardStudio" {
+                        // Parse as Dashboard Studio JSON
+                        let parser = DashboardStudioParser()
+                        var studioConfig = try await parser.parse(dashboardXML)
+                        print("🔵 studioConfig: \(studioConfig)")
+                        // Use entry.name as fallback if title is empty
+                        if studioConfig.title.isEmpty {
+                            studioConfig = DashboardStudioConfiguration(
+                                title: entry.name,
+                                description: studioConfig.description,
+                                visualizations: studioConfig.visualizations,
+                                dataSources: studioConfig.dataSources,
+                                layout: studioConfig.layout,
+                                inputs: studioConfig.inputs,
+                                defaults: studioConfig.defaults
+                            )
+                        }
+
+                        _ = try await manager.saveDashboard(studioConfig, dataSourceConfigId: dataSourceConfigId, rawJSON: dashboardXML)
+                        syncedCount += 1
+                    } else {
+                        // Parse as Simple XML
+                        let msg = "🟢 About to parse SimpleXML for '\(entry.name)'\n"
+                        try? msg.data(using: .utf8)?.write(to: URL(fileURLWithPath: "/tmp/sync_debug.log"), options: .atomic)
+
+                        let parser = SimpleXMLParser()
+                        var simpleXMLConfig = try parser.parse(dashboardXML)
+                        print("🔵 simpleXMLConfig: \(simpleXMLConfig)")
+                        let parsed = "🟢 Parsed! Label: '\(simpleXMLConfig.label)', Rows: \(simpleXMLConfig.rows.count)\n"
+                        if let data = parsed.data(using: .utf8),
+                           let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: "/tmp/sync_debug.log")) {
+                            handle.seekToEndOfFile()
+                            handle.write(data)
+                            try? handle.close()
+                        }
+
+                        // Use entry.name as fallback if label is empty
+                        if simpleXMLConfig.label.isEmpty {
+                            simpleXMLConfig = SimpleXMLConfiguration(
+                                label: entry.name,
+                                description: simpleXMLConfig.description,
+                                rows: simpleXMLConfig.rows,
+                                fieldsets: simpleXMLConfig.fieldsets
+                            )
+                        }
+
+                        _ = try await manager.saveDashboard(simpleXMLConfig, dataSourceConfigId: dataSourceConfigId, rawXML: dashboardXML)
+                        syncedCount += 1
+                    }
+                } catch {
+                    let errMsg = "❌ ERROR for '\(entry.name)': \(error)\n"
+                    if let data = errMsg.data(using: .utf8),
+                       let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: "/tmp/sync_debug.log")) {
+                        handle.seekToEndOfFile()
+                        handle.write(data)
+                        try? handle.close()
+                    }
+                    print("⚠️ Failed to save dashboard '\(entry.name)': \(error.localizedDescription)")
+                }
+            }
+
+            // Update statistics
+            await MainActor.run {
+                lastSyncDate = Date()
+                updateDashboardCount()
+            }
+
+            syncResult = .success(message: "Synced \(syncedCount) of \(maxToSync) dashboards from '\(splunkDefaultApp)' app")
+        } catch {
+            syncResult = .failure(message: "Sync failed: \(error.localizedDescription)")
         }
-        
+
         isSyncing = false
     }
 
@@ -822,8 +934,8 @@ struct SettingsView: View {
     }
     
     private func calculateCoreDataSize() {
-        // Use persistenceController (which uses DashboardKit model)
-        guard let storeURL = persistenceController.container.persistentStoreCoordinator.persistentStores.first?.url else {
+        // Use PersistenceController.shared (which uses DashboardKit model)
+        guard let storeURL = PersistenceController.shared.container.persistentStoreCoordinator.persistentStores.first?.url else {
             coreDataSize = "Unable to determine size"
             return
         }
@@ -843,7 +955,7 @@ struct SettingsView: View {
     }
 
     private func clearAllCoreData() {
-        let context = persistenceController.context
+        let context = PersistenceController.shared.context
 
         // Delete all DashboardKit entities
         let entityNames = [
@@ -1039,71 +1151,86 @@ struct DashboardExportView: View {
         isExporting = true
         exportStatus = "Preparing export..."
 
+        // Extract all data from Core Data BEFORE async operations
+        // Core Data objects are not thread-safe and must be accessed from their context
+        let exportId = dashboard.id?.uuidString ?? "unknown"
+        let exportTitle = dashboard.title ?? "Untitled"
+        let exportFormatType = dashboard.formatType ?? "dashboardStudio"
+        let exportCreatedAt = dashboard.createdAt?.ISO8601Format() ?? ""
+        let exportUpdatedAt = dashboard.updatedAt?.ISO8601Format() ?? ""
+        let exportDescription = dashboard.dashboardDescription
+        let exportRawJSON = dashboard.rawJSON
+
+        // Extract data sources
+        let exportDataSources: [[String: String]]? = {
+            if let dataSources = dashboard.dataSources?.allObjects as? [DataSource] {
+                return dataSources.map { ds in
+                    [
+                        "sourceId": ds.sourceId ?? "",
+                        "name": ds.name ?? "",
+                        "type": ds.type ?? "",
+                        "query": ds.query ?? ""
+                    ]
+                }
+            }
+            return nil
+        }()
+
         // Create save panel
         let savePanel = NSSavePanel()
         savePanel.title = "Export Dashboard"
         savePanel.message = "Choose where to save the dashboard export"
-        let dashboardName = dashboard.title?.replacingOccurrences(of: " ", with: "_") ?? "dashboard"
+        let dashboardName = exportTitle.replacingOccurrences(of: " ", with: "_")
         savePanel.nameFieldStringValue = "\(dashboardName)_export.json"
         savePanel.allowedContentTypes = [.json]
         savePanel.canCreateDirectories = true
-        savePanel.begin { [self] response in
+        savePanel.begin { response in
             if response == .OK, let url = savePanel.url {
-                Task {
+                Task { @MainActor in
                     do {
-                        // Create export data structure
+                        // Create export data structure using pre-extracted data
                         var exportData: [String: Any] = [
-                            "id": dashboard.id?.uuidString ?? "unknown",
-                            "title": dashboard.title ?? "Untitled",
-                            "formatType": dashboard.formatType ?? "dashboardStudio",
-                            "createdAt": dashboard.createdAt?.ISO8601Format() ?? "",
-                            "updatedAt": dashboard.updatedAt?.ISO8601Format() ?? ""
+                            "id": exportId,
+                            "title": exportTitle,
+                            "formatType": exportFormatType,
+                            "createdAt": exportCreatedAt,
+                            "updatedAt": exportUpdatedAt
                         ]
 
-                        if let description = dashboard.dashboardDescription {
+                        if let description = exportDescription {
                             exportData["description"] = description
                         }
 
-                        // Include raw JSON if available (contains full Studio configuration)
-                        if let rawJSON = dashboard.rawJSON {
+                        if let rawJSON = exportRawJSON {
                             exportData["rawJSON"] = rawJSON
                         }
 
-                        // Include data sources
-                        if let dataSources = dashboard.dataSources?.allObjects as? [DataSource] {
-                            let dsExport = dataSources.map { ds in
-                                [
-                                    "sourceId": ds.sourceId ?? "",
-                                    "name": ds.name ?? "",
-                                    "type": ds.type ?? "",
-                                    "query": ds.query ?? ""
-                                ]
-                            }
-                            exportData["dataSources"] = dsExport
+                        if let dataSources = exportDataSources {
+                            exportData["dataSources"] = dataSources
                         }
 
                         // Convert to JSON
                         let jsonData = try JSONSerialization.data(withJSONObject: exportData, options: [.prettyPrinted, .sortedKeys])
                         try jsonData.write(to: url)
 
-                        await MainActor.run {
-                            exportStatus = "Success: Dashboard exported to \(url.lastPathComponent)"
-                            isExporting = false
-                        }
+                        self.exportStatus = "Success: Dashboard exported to \(url.lastPathComponent)"
+                        self.isExporting = false
                     } catch {
-                        await MainActor.run {
-                            exportStatus = "Error: \(error.localizedDescription)"
-                            isExporting = false
-                        }
+                        self.exportStatus = "Error: \(error.localizedDescription)"
+                        self.isExporting = false
                     }
                 }
             } else {
-                exportStatus = "Export cancelled"
-                isExporting = false
+                self.exportStatus = "Export cancelled"
+                self.isExporting = false
             }
         }
     }
 }
+
+// NOTE: All Splunk API functionality is now in DashboardKit/Managers/SplunkIntegration.swift
+// This includes: SplunkRestClient, SplunkAuthenticationService, SplunkDashboardService, etc.
+
 #endif
 
 #endif

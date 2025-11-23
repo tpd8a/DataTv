@@ -1,7 +1,7 @@
 # Dashboard Export Feature
 
 ## Overview
-Added a new feature to the Data Management section in Settings that allows users to export complete dashboard object graphs to JSON files, using the same export functionality as the CLI tool.
+Added a new feature to the Data Management section in Settings that allows users to export complete dashboard configurations to JSON files. This feature uses the **modern DashboardKit entities** (Dashboard, DataSource, Visualization, etc.) to export both Dashboard Studio and SimpleXML formats.
 
 ## User Flow
 
@@ -11,11 +11,11 @@ Added a new feature to the Data Management section in Settings that allows users
 - Find the **Data Management** section
 - Click **Export Dashboard Details...**
 
-### 2. Select App and Dashboard
+### 2. Select Dashboard
 A modal sheet will appear with:
-- **App Selector**: Choose from available apps in your CoreData database
-- **Dashboard Selector**: After selecting an app, choose a specific dashboard
-- Only dashboards that have been synced to CoreData will appear
+- **Dashboard Selector**: Choose from dashboards synced to CoreData
+- Only dashboards that have been synced via the Dashboards tab will appear
+- Supports both Dashboard Studio (v2) and SimpleXML (v1) formats
 
 ### 3. Export to JSON
 - Click **Export Dashboard...** button
@@ -24,14 +24,28 @@ A modal sheet will appear with:
 
 ## Exported Data Structure
 
-The JSON file is a complete CoreData object graph export (same as CLI `query export-json` command), including:
+The JSON file exports the dashboard configuration using **DashboardKit entities**:
 
-- Complete dashboard entity structure
-- All related searches and their configurations  
-- Search dependencies and relationships
-- Token definitions and usage
-- Panel and visualization information
-- All metadata and relationships preserved
+### Dashboard Studio Format (v2)
+- **Dashboard** entity with metadata (title, description, formatType)
+- **DataSource** entities (SPL queries, saved searches, chained searches)
+- **Visualization** entities (tables, charts, single values with formatting)
+- **DashboardLayout** and **LayoutItem** entities (absolute/grid positioning)
+- **DashboardInput** entities (time pickers, dropdowns, text inputs)
+- Original Studio JSON preserved in `rawJSON` field
+
+### SimpleXML Format (v1)
+- **Dashboard** entity with metadata
+- **DataSource** entities (searches with earliest/latest/ref)
+- **Visualization** entities (visualizations with type and options)
+- **LayoutItem** entities (bootstrap-style positioning)
+- Original SimpleXML preserved in `rawXML` field
+
+### Common Fields
+- All relationships preserved (dashboard → dataSources → visualizations)
+- Search execution history (optional, if available)
+- Saved search metadata (owner, app, ref)
+- Token substitution patterns
 
 ## Implementation Details
 
@@ -51,11 +65,11 @@ The JSON file is a complete CoreData object graph export (same as CLI `query exp
 ## Code Architecture
 
 ### Data Flow
-1. User selects app → Filters dashboards by app
-2. User selects dashboard → Enables export button  
-3. Export button → Redirects stdout to file
-4. Calls `loader.exportDashboardAsJSON(dashboardId)` → Writes to redirected stdout
-5. Restores stdout → Completes export
+1. User opens export modal → Loads Dashboard entities from DashboardKit CoreData
+2. User selects dashboard → Enables export button
+3. Export button → Opens save dialog
+4. Exports Dashboard entity with all relationships to JSON
+5. Writes to selected file location
 
 ### Stdout Redirection Technique
 ```swift
@@ -107,12 +121,26 @@ splunk-dashboard query export-json my_dashboard > output.json
 - Ensures GUI and CLI exports are identical
 - Leverages CoreData's JSON encoding automatically
 
-### CoreData Object Graph
+### DashboardKit Entity Graph
 The export includes the complete entity graph with all relationships:
-- Dashboard → Searches (one-to-many)
-- Searches → Dependencies (many-to-many)
-- Dashboard → Tokens (one-to-many)
+- **Dashboard** → **DataSources** (one-to-many)
+- **Dashboard** → **Visualizations** (one-to-many)
+- **Dashboard** → **DashboardInputs** (one-to-many)
+- **Dashboard** → **DashboardLayout** (one-to-one)
+- **DashboardLayout** → **LayoutItems** (one-to-many)
+- **Visualization** → **DataSource** (many-to-one)
+- **DataSource** → **SearchExecutions** (one-to-many, optional)
 - All attributes and metadata preserved
+
+### Entity Types Used
+- `Dashboard` (from DashboardKit)
+- `DataSource` (from DashboardKit)
+- `Visualization` (from DashboardKit)
+- `DashboardLayout` (from DashboardKit)
+- `LayoutItem` (from DashboardKit)
+- `DashboardInput` (from DashboardKit)
+
+See [PROJECT_ARCHITECTURE.md](../PROJECT_ARCHITECTURE.md) for complete entity details.
 
 ## Future Enhancements
 
@@ -157,8 +185,15 @@ struct ExportJSONCommand: AsyncParsableCommand {
 }
 ```
 
-### Extension Point
+### Architecture Notes
 This feature uses:
-- `DashboardEntity`: Core dashboard metadata from CoreData
-- `DashboardLoader.exportDashboardAsJSON()`: Existing export method
-- File descriptor manipulation for stdout redirection
+- **`Dashboard`** (DashboardKit): Modern entity with UUID IDs
+- **`CoreDataManager.shared.viewContext`**: For querying dashboards
+- **Native JSON encoding**: Encodes Dashboard entity with relationships
+- **Both formats supported**: Dashboard Studio (JSON) and SimpleXML
+
+### Migration from Legacy
+**Before**: Used `DashboardEntity` from d8aTvCore
+**After**: Uses `Dashboard` from DashboardKit (modern, UUID-based)
+
+See [D8ATVCORE_MIGRATION_STATUS.md](../D8ATVCORE_MIGRATION_STATUS.md) for migration details.
