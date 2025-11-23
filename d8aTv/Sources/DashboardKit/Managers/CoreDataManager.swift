@@ -323,7 +323,7 @@ public actor CoreDataManager {
                             let formatsArray = panel.visualization.formats.map { format -> [String: Any] in
                                 var dict: [String: Any] = [:]
                                 for (key, value) in format {
-                                    dict[key] = value.value
+                                    dict[key] = self.unwrapAnyCodable(value)
                                 }
                                 return dict
                             }
@@ -405,6 +405,54 @@ public actor CoreDataManager {
         }
 
         return dashboardId
+    }
+
+    // MARK: - Helper Functions
+
+    /// Recursively unwrap AnyCodable to JSON-compatible types
+    private nonisolated func unwrapAnyCodable(_ value: AnyCodable) -> Any {
+        let unwrapped = value.value
+
+        // Handle nested dictionaries
+        if let dict = unwrapped as? [String: AnyCodable] {
+            var result: [String: Any] = [:]
+            for (key, val) in dict {
+                result[key] = unwrapAnyCodable(val)
+            }
+            return result
+        }
+
+        // Handle arrays
+        if let array = unwrapped as? [AnyCodable] {
+            return array.map { unwrapAnyCodable($0) }
+        }
+
+        // Handle nested [String: Any] (already unwrapped one level)
+        if let dict = unwrapped as? [String: Any] {
+            var result: [String: Any] = [:]
+            for (key, val) in dict {
+                if let codable = val as? AnyCodable {
+                    result[key] = unwrapAnyCodable(codable)
+                } else {
+                    result[key] = val
+                }
+            }
+            return result
+        }
+
+        // Handle arrays of Any
+        if let array = unwrapped as? [Any] {
+            return array.map { item in
+                if let codable = item as? AnyCodable {
+                    return unwrapAnyCodable(codable)
+                } else {
+                    return item
+                }
+            }
+        }
+
+        // Return primitives as-is
+        return unwrapped
     }
 
     // MARK: - Search Execution
