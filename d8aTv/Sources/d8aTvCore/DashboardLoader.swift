@@ -1048,8 +1048,10 @@ public class DashboardLoader {
                         search = parseSearch(from: searchElement)
                     }
                     let extracted = tableElement.extractAllOptions()
+                    print("🔍 DashboardLoader: extracted = \(extracted)")
                     vizOptions = extracted["options"] as? [String: String] ?? [:]
                     formatsArray = extracted["formats"] as? [[String: Any]] ?? []
+                    print("🔍 DashboardLoader: found \(formatsArray.count) format(s) for table")
                 } else if let chartElement = panelElement.element(named: "chart") {
                     vizType = .chart
                     if let searchElement = chartElement.element(named: "search") {
@@ -1076,12 +1078,14 @@ public class DashboardLoader {
                     }
                     return result
                 }
+                print("🔍 DashboardLoader: converted to \(formatsAnyCodable.count) AnyCodable format(s)")
 
                 let visualization = SimpleXMLVisualization(
                     type: vizType,
                     options: vizOptions,
                     formats: formatsAnyCodable
                 )
+                print("🔍 DashboardLoader: created visualization with \(visualization.formats.count) format(s)")
                 let panel = SimpleXMLPanel(
                     title: title,
                     visualization: visualization,
