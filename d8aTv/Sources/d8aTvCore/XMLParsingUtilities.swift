@@ -191,7 +191,7 @@ public class SimpleXMLElement {
 }
 
 /// Simple XML Parser for Splunk SimpleXML dashboards
-public class SimpleXMLParser: NSObject, XMLParserDelegate {
+public class GenericXMLParser: NSObject, XMLParserDelegate {
     private var root: SimpleXMLElement?
     private var currentElement: SimpleXMLElement?
     private var elementStack: [SimpleXMLElement] = []
