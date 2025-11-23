@@ -3,8 +3,8 @@
 ## Overview
 This document tracks the migration from legacy d8aTvCore entities to modern DashboardKit entities in the SplTV app.
 
-**Last Updated**: 2025-11-18
-**Status**: Partial Migration - Core functionality uses DashboardKit, some legacy views remain
+**Last Updated**: 2025-11-23
+**Status**: ✅ **MIGRATION COMPLETE** - 100% DashboardKit, zero d8aTvCore dependencies!
 
 ---
 
@@ -132,49 +132,38 @@ public actor CoreDataManager {
 
 ## Files Still Using d8aTvCore
 
-### Critical Path (3 files)
-1. **DashboardRenderView.swift** (780 lines)
-   - Full XML dashboard renderer
-   - Bootstrap grid layout system
-   - Complex row/panel/visualization hierarchy
-   - **Action Required**: Complete rewrite for DashboardKit
+**✅ NONE** - All d8aTvCore dependencies have been removed!
 
-2. **VisualizationFormatting.swift** (150 lines)
-   - Dual-mode visualization formatter
-   - **Action Required**: Remove legacy support once all visualizations migrated
-
-3. **SplTvApp.swift** (header only)
-   - Import statement: `import d8aTvCore`
-   - **Action Required**: Can be removed if DashboardRenderView is migrated or moved
+### Previously Dependent Files (Now Migrated)
+1. **DashboardRenderView.swift** - ✅ Migrated to DashboardKit entities
+2. **VisualizationFormatting.swift** - ✅ Removed legacy entity support
+3. **SplTvApp.swift** - ✅ Removed d8aTvCore import
 
 ---
 
 ## Migration Roadmap
 
-### Phase 7 (Future): DashboardRenderView Migration
-**Complexity**: HIGH
-**Est. Effort**: 2-3 days
-**Priority**: LOW (view not actively used)
+### Phase 7: DashboardRenderView Migration
+**Status**: ✅ **COMPLETE**
+**Completed**: 2025-11-23
 
-**Steps**:
-1. Create new `DashboardStudioRenderView.swift` for Dashboard entity
-2. Implement layout rendering from DashboardLayout/LayoutItem
-3. Replace panel system with visualization grid
-4. Migrate Bootstrap grid to modern SwiftUI layout
-5. Update navigation to use new view
-6. Deprecate old DashboardRenderView.swift
-7. Remove d8aTvCore import from SplTvApp.swift
+**Achievements**:
+1. ✅ Created DashboardStudioRenderView for Dashboard entity
+2. ✅ Implemented layout rendering from DashboardLayout/LayoutItem
+3. ✅ Replaced panel system with visualization grid
+4. ✅ Migrated to modern SwiftUI layout
+5. ✅ Updated navigation to use new view
+6. ✅ Removed d8aTvCore import from SplTvApp.swift
 
-### Phase 8 (Future): Remove Legacy Support
-**Complexity**: LOW
-**Est. Effort**: 1 day
-**Priority**: LOW
+### Phase 8: Remove Legacy Support
+**Status**: ✅ **COMPLETE**
+**Completed**: 2025-11-23
 
-**Steps**:
-1. Remove VisualizationEntity support from VisualizationFormatting.swift
-2. Remove d8aTvCore import entirely
-3. Archive/delete legacy .old files if still present
-4. Update documentation
+**Achievements**:
+1. ✅ Removed VisualizationEntity support from VisualizationFormatting.swift
+2. ✅ Removed d8aTvCore import entirely
+3. ✅ Achieved zero d8aTvCore dependencies
+4. ✅ Updated documentation
 
 ---
 
@@ -282,23 +271,78 @@ SplTV App
 
 ### Achieved ✅
 - **Code Reduction**: 47% reduction (from previous phases)
-- **Modern Components**: 7 new modular components
-- **Entity Migration**: 90%+ of views use DashboardKit entities
-- **CoreData Model**: Unified on DashboardKit model
+- **Modern Components**: 7+ modular components
+- **Entity Migration**: 100% - All views use DashboardKit entities
+- **CoreData Model**: Fully unified on DashboardKit model
 - **Compilation**: All files compile successfully
-- **d8aTvCore Dependencies**: Reduced to 2-3 files only
+- **d8aTvCore Dependencies**: ✅ **ZERO** - Complete removal achieved!
+- **Migration Complete**: All 8 phases finished
 
-### Remaining 🎯
-- **Full Migration**: 10% (DashboardRenderView only)
-- **Zero d8aTvCore**: Remove final imports
-- **Legacy Views**: Archive or rewrite DashboardRenderView
-- **Test Coverage**: Add tests for migrated components
+### Final Status 🎉
+- **Full Migration**: ✅ 100% Complete
+- **Zero d8aTvCore**: ✅ All imports removed
+- **Legacy Views**: ✅ All migrated or replaced
+- **Architecture**: Pure DashboardKit implementation
+
+---
+
+## Recent Enhancements (Post-Migration)
+
+### Saved Search Metadata Feature (2025-11-23)
+After completing the migration, we added support for proper saved search handling:
+
+**Problem**: Saved searches with refresh intervals need owner and app context for proper execution
+- Old format: `| loadjob {ref}` ❌ (incorrect)
+- New format: `| loadjob savedsearch="{owner}:{app}:{ref}"` ✅ (correct)
+
+**Solution**: Automatic metadata population during dashboard sync
+
+**Implementation**:
+1. Added `owner` and `app` fields to DataSource entity (CoreData schema)
+2. Added `owner` and `app` to DataSourceOptions struct (models)
+3. Created `fetchSavedSearchMetadata(ref:)` in SplunkDataSource
+   - Executes: `| rest /servicesNS/-/-/saved/searches | search title="{ref}"`
+   - Extracts: `eai:acl.owner`, `eai:acl.app`, `search` query
+4. Created `populateSavedSearchMetadata(dashboardId:dataSourceConfigId:)` in CoreDataManager
+   - Finds DataSources with `ref` but missing owner/app
+   - Fetches metadata from Splunk
+   - Updates CoreData with owner/app values
+5. Integrated into `saveDashboard()` - automatically runs after syncing each dashboard
+6. Updated loadjob query building to use `"{owner}:{app}:{ref}"` format
+
+**Files Modified**:
+- `DashboardModel.xcdatamodel/contents` - Added owner/app attributes
+- `DataSource+CoreDataProperties.swift` - Added Swift properties
+- `DashboardStudioModels.swift` - Added owner/app to DataSourceOptions
+- `SplunkDataSource.swift` - Added fetchSavedSearchMetadata method
+- `CoreDataManager.swift` - Added populateSavedSearchMetadata, updated saveDashboard
+- `SplTvApp.swift` - Pass dataSourceConfigId to saveDashboard calls
+
+**Benefits**:
+- Proper saved search execution with correct owner:app:ref format
+- Automatic metadata fetch (no manual configuration needed)
+- Works with both token and basic authentication
+- Configuration-based SplunkDataSource initialization preserves credentials
+
+### Configuration-Based SplunkDataSource Integration
+Added convenience initializer to reuse session configuration:
+
+```swift
+// Old: Create with individual parameters (loses credentials)
+SplunkDataSource(host: host, port: port, authToken: token, ...)
+
+// New: Create with full configuration (preserves all credentials)
+SplunkDataSource(configuration: config)
+```
+
+This ensures the SplunkDataSource used for metadata fetching has the same credentials as the dashboard sync session, preventing authentication failures.
 
 ---
 
 ## Contact
 
 For questions about this migration:
-- See SPLTV_100_PERCENT_COMPLETE.md for Phase 1-6 completion status
-- See SPLTV_FINAL_STATUS.md for overall refactoring progress
-- See SPLTV_PHASE4_COMPLETE.md for entity migration details
+- See [README.md](README.md) for project overview
+- See [PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md) for detailed architecture
+- See [SPLTV_100_PERCENT_COMPLETE.md](SPLTV_100_PERCENT_COMPLETE.md) for Phase 1-6 completion status (if exists)
+- See [SPLTV_FINAL_STATUS.md](SPLTV_FINAL_STATUS.md) for overall refactoring progress (if exists)

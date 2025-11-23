@@ -2,7 +2,7 @@
 
 ## Summary of Changes
 
-This document outlines the updates made to the application settings in `SplTvApp.swift` to improve authentication options and data management.
+This document outlines the updates made to the application settings in `SplTvApp.swift` to improve authentication options and data management. All CoreData operations use the **modern DashboardKit entities** (see [PROJECT_ARCHITECTURE.md](../PROJECT_ARCHITECTURE.md)).
 
 ## Changes Made
 
@@ -60,10 +60,13 @@ Connection Tab
 
 **New Functions:**
 - `calculateCoreDataSize()` - Gets the physical size of the CoreData store file
-- `clearAllCoreData()` - Performs batch delete operations on all entities
-  - Deletes: DashboardEntity, SearchEntity, SearchExecutionEntity, SearchResultRecordEntity
+- `clearAllCoreData()` - Performs batch delete operations on all **DashboardKit entities**
+  - Deletes: Dashboard, DataSource, Visualization, SearchExecution, SearchResult, DashboardInput, DashboardLayout, LayoutItem, DataSourceConfig
+  - Uses `PersistenceController.shared` (DashboardKit model)
   - Updates UI after clearing
   - Shows success/failure message
+
+**Note**: This now operates on the **DashboardKit CoreData model**, not the legacy d8aTvCore entities.
 
 **New UI in Reset Tab:**
 ```

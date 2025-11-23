@@ -16,6 +16,8 @@ extension DataSource {
     @NSManaged public var refreshType: String?
     @NSManaged public var optionsJSON: String?
     @NSManaged public var extendsId: String?
+    @NSManaged public var owner: String?  // Saved search owner (e.g., "admin")
+    @NSManaged public var app: String?    // Saved search app context (e.g., "search")
     @NSManaged public var dashboard: Dashboard?
     @NSManaged public var executions: NSSet?
     @NSManaged public var visualizations: NSSet?

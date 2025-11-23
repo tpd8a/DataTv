@@ -1,7 +1,7 @@
 # Enhanced Animation System for Table Results
 
 ## Overview
-This enhancement improves the animation system for table result changes by using Splunk's `groupby_rank` field metadata to intelligently identify row keys and apply appropriate animations based on whether rows are new, deleted, or simply have changed values.
+This enhancement improves the animation system for table result changes by using Splunk's `groupby_rank` field metadata to intelligently identify row keys and apply appropriate animations based on whether rows are new, deleted, or simply have changed values. Uses **DashboardKit entities** (SearchExecution, SearchResult) for data access.
 
 ## Key Features
 

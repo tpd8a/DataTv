@@ -97,6 +97,8 @@ public struct DataSourceOptions: Codable, Sendable {
     public let enableSmartSources: Bool?
     public let extend: String?  // For ds.chain type - references base data source
     public let ref: String?     // For ds.savedSearch type - references saved search
+    public let owner: String?   // Saved search owner (e.g., "admin")
+    public let app: String?     // Saved search app context (e.g., "search")
 
     public init(
         query: String? = nil,
@@ -105,7 +107,9 @@ public struct DataSourceOptions: Codable, Sendable {
         refreshType: String? = nil,
         enableSmartSources: Bool? = nil,
         extend: String? = nil,
-        ref: String? = nil
+        ref: String? = nil,
+        owner: String? = nil,
+        app: String? = nil
     ) {
         self.query = query
         self.queryParameters = queryParameters
@@ -114,6 +118,8 @@ public struct DataSourceOptions: Codable, Sendable {
         self.enableSmartSources = enableSmartSources
         self.extend = extend
         self.ref = ref
+        self.owner = owner
+        self.app = app
     }
 }
 

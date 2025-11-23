@@ -1,74 +1,81 @@
 import Foundation
 
 /// Splunk REST API data source implementation
+/// Now uses consolidated SplunkIntegration services instead of direct API calls
 public actor SplunkDataSource: DataSourceProtocol {
     public let type: DataSourceType = .splunk
 
-    private let host: String
-    private let port: Int
-    private let username: String?
-    private let authToken: String?
-    private let useSSL: Bool
+    private let searchService: SplunkSearchService
+    private let restClient: SplunkRestClient
 
-    private var baseURL: URL {
-        let scheme = useSSL ? "https" : "http"
-        return URL(string: "\(scheme)://\(host):\(port)")!
+    /// Initialize with a SplunkConfiguration (recommended - preserves all credentials and settings)
+    public init(configuration: SplunkConfiguration) {
+        self.restClient = SplunkRestClient(configuration: configuration)
+        self.searchService = SplunkSearchService(restClient: restClient)
     }
 
+    /// Initialize with individual parameters (legacy - for simple cases)
     public init(
         host: String,
         port: Int = 8089,
         username: String? = nil,
         authToken: String? = nil,
-        useSSL: Bool = true
+        useSSL: Bool = true,
+        validateSSL: Bool = true
     ) {
-        self.host = host
-        self.port = port
-        self.username = username
-        self.authToken = authToken
-        self.useSSL = useSSL
+        // Build base URL
+        let scheme = useSSL ? "https" : "http"
+        guard let baseURL = URL(string: "\(scheme)://\(host):\(port)") else {
+            fatalError("Invalid Splunk URL: \(scheme)://\(host):\(port)")
+        }
+
+        // Create credentials
+        let credentials: SplunkCredentials
+        if let token = authToken {
+            credentials = .token(token)
+        } else if let user = username {
+            // Basic auth (for testing/development only - password hardcoded)
+            credentials = .basic(username: user, password: "password")
+        } else {
+            // No auth
+            credentials = .basic(username: "", password: "")
+        }
+
+        // Create Splunk configuration
+        let config = SplunkConfiguration(
+            baseURL: baseURL,
+            credentials: credentials,
+            timeout: 60,
+            allowInsecureConnections: !validateSSL,
+            validateSSLCertificate: validateSSL
+        )
+
+        // Create REST client and search service
+        self.restClient = SplunkRestClient(configuration: config)
+        self.searchService = SplunkSearchService(restClient: restClient)
     }
 
     // MARK: - DataSourceProtocol Implementation
 
     public func executeSearch(query: String, parameters: SearchParameters) async throws -> SearchExecutionResult {
-        var urlComponents = URLComponents(url: baseURL.appendingPathComponent("/services/search/jobs"), resolvingAgainstBaseURL: true)!
-
-        var request = URLRequest(url: urlComponents.url!)
-        request.httpMethod = "POST"
-        addAuthHeaders(to: &request)
-
-        // Build search parameters with token substitution
+        // Substitute tokens in query
         let processedQuery = substituteTokens(in: query, tokens: parameters.tokens)
 
-        var formData: [String: String] = [
-            "search": processedQuery,
-            "output_mode": "json"
-        ]
+        print("🌐 Executing search via SplunkSearchService:")
+        print("   Query: \(processedQuery)")
+        print("   Earliest: \(parameters.earliestTime ?? "none")")
+        print("   Latest: \(parameters.latestTime ?? "none")")
 
-        if let earliest = parameters.earliestTime {
-            formData["earliest_time"] = earliest
-        }
+        // Use SplunkSearchService to create the search job
+        let searchJob = try await searchService.createSearchJob(
+            query: processedQuery,
+            earliest: parameters.earliestTime,
+            latest: parameters.latestTime,
+            maxCount: parameters.maxResults,
+            parameters: [:] as [String: String]  // Empty dict with explicit type to satisfy Sendable
+        )
 
-        if let latest = parameters.latestTime {
-            formData["latest_time"] = latest
-        }
-
-        if let maxResults = parameters.maxResults {
-            formData["max_count"] = String(maxResults)
-        }
-
-        request.httpBody = formData.percentEncoded()
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200...299).contains(httpResponse.statusCode) else {
-            throw DataSourceError.apiError(message: "Failed to create search job")
-        }
-
-        let searchJob = try JSONDecoder().decode(SplunkSearchJobResponse.self, from: data)
+        print("✅ Search job created: \(searchJob.sid)")
 
         return SearchExecutionResult(
             executionId: searchJob.sid,
@@ -79,25 +86,12 @@ public actor SplunkDataSource: DataSourceProtocol {
     }
 
     public func checkSearchStatus(executionId: String) async throws -> SearchStatus {
-        let url = baseURL.appendingPathComponent("/services/search/jobs/\(executionId)")
-        var urlComponents = URLComponents(url: url, resolvingAgainstBaseURL: true)!
-        urlComponents.queryItems = [URLQueryItem(name: "output_mode", value: "json")]
+        // Use SplunkSearchService to check status
+        let status = try await searchService.getSearchJobStatus(sid: executionId)
 
-        var request = URLRequest(url: urlComponents.url!)
-        addAuthHeaders(to: &request)
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200...299).contains(httpResponse.statusCode) else {
-            throw DataSourceError.apiError(message: "Failed to get search status")
-        }
-
-        let statusResponse = try JSONDecoder().decode(SplunkSearchStatusResponse.self, from: data)
-
-        if statusResponse.entry.first?.content.isFailed == true {
+        if status.isFailed {
             return .failed
-        } else if statusResponse.entry.first?.content.isDone == true {
+        } else if status.isDone {
             return .completed
         } else {
             return .running
@@ -105,84 +99,96 @@ public actor SplunkDataSource: DataSourceProtocol {
     }
 
     public func fetchResults(executionId: String, offset: Int, limit: Int) async throws -> [SearchResultRow] {
-        let url = baseURL.appendingPathComponent("/services/search/jobs/\(executionId)/results")
-        var urlComponents = URLComponents(url: url, resolvingAgainstBaseURL: true)!
-        urlComponents.queryItems = [
-            URLQueryItem(name: "output_mode", value: "json"),
-            URLQueryItem(name: "offset", value: String(offset)),
-            URLQueryItem(name: "count", value: String(limit))
-        ]
+        // Use SplunkSearchService to fetch results
+        let results = try await searchService.getSearchResults(
+            sid: executionId,
+            offset: offset,
+            count: limit
+        )
 
-        var request = URLRequest(url: urlComponents.url!)
-        addAuthHeaders(to: &request)
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200...299).contains(httpResponse.statusCode) else {
-            throw DataSourceError.apiError(message: "Failed to fetch results")
-        }
-
-        let resultsResponse = try JSONDecoder().decode(SplunkSearchResultsResponse.self, from: data)
-
-        return resultsResponse.results.map { result in
-            SearchResultRow(
-                fields: result,
+        return results.results.map { result in
+            // Unwrap AnyCodable values to get the actual values
+            let unwrappedFields: [String: Any] = result.mapValues { $0.value }
+            return SearchResultRow(
+                fields: unwrappedFields,
                 timestamp: Date()
             )
         }
     }
 
     public func cancelSearch(executionId: String) async throws {
-        let url = baseURL.appendingPathComponent("/services/search/jobs/\(executionId)/control")
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        addAuthHeaders(to: &request)
-
-        let formData = ["action": "cancel"]
-        request.httpBody = formData.percentEncoded()
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-
-        let (_, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200...299).contains(httpResponse.statusCode) else {
-            throw DataSourceError.apiError(message: "Failed to cancel search")
-        }
+        // Cancel search by deleting the job
+        // Note: SplunkSearchService doesn't have a cancel method yet,
+        // but we can delete the job via REST client
+        let endpoint = "services/search/jobs/\(executionId)"
+        let _: EmptyResponse = try await restClient.delete(endpoint, responseType: EmptyResponse.self)
     }
 
     public func validateConnection() async throws -> Bool {
-        let url = baseURL.appendingPathComponent("/services/server/info")
-        var urlComponents = URLComponents(url: url, resolvingAgainstBaseURL: true)!
-        urlComponents.queryItems = [URLQueryItem(name: "output_mode", value: "json")]
-
-        var request = URLRequest(url: urlComponents.url!)
-        addAuthHeaders(to: &request)
-
-        let (_, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
+        // Validate connection by checking server info
+        do {
+            struct ServerInfoResponse: Codable {}
+            _ = try await restClient.get(
+                "services/server/info",
+                parameters: ["output_mode": "json"],
+                responseType: ServerInfoResponse.self
+            )
+            return true
+        } catch {
             return false
         }
+    }
 
-        return (200...299).contains(httpResponse.statusCode)
+    /// Fetch saved search metadata (owner, app, query) from Splunk
+    public func fetchSavedSearchMetadata(ref: String) async throws -> (owner: String, app: String, query: String) {
+        print("🔍 Fetching saved search metadata for ref: \(ref)")
+
+        // Execute Splunk REST search to find saved search details
+        let query = """
+        | rest /servicesNS/-/-/saved/searches
+        | search title="\(ref)"
+        | table title, eai:acl.app, eai:acl.owner, search
+        | head 1
+        """
+
+        // Create a search job
+        let searchJob = try await searchService.createSearchJob(
+            query: query,
+            earliest: nil,
+            latest: nil,
+            maxCount: 1,
+            parameters: [:] as [String: String]
+        )
+
+        // Wait for job to complete (poll for up to 30 seconds)
+        var attempts = 0
+        while attempts < 30 {
+            let status = try await searchService.getSearchJobStatus(sid: searchJob.sid)
+            if status.isDone {
+                break
+            }
+            try await Task.sleep(for: .seconds(1))
+            attempts += 1
+        }
+
+        // Fetch results
+        let results = try await searchService.getSearchResults(sid: searchJob.sid, offset: 0, count: 1)
+
+        guard let firstResult = results.results.first else {
+            throw DataSourceError.searchFailed(message: "Saved search '\(ref)' not found")
+        }
+
+        // Extract fields
+        let owner = (firstResult["eai:acl.owner"]?.value as? String) ?? "admin"
+        let app = (firstResult["eai:acl.app"]?.value as? String) ?? "search"
+        let savedQuery = (firstResult["search"]?.value as? String) ?? ""
+
+        print("✅ Found saved search: owner=\(owner), app=\(app)")
+
+        return (owner: owner, app: app, query: savedQuery)
     }
 
     // MARK: - Private Helpers
-
-    private func addAuthHeaders(to request: inout URLRequest) {
-        if let authToken = authToken {
-            request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
-        } else if let username = username {
-            // Basic auth (for testing/development only)
-            let credentials = "\(username):password"
-            if let credentialsData = credentials.data(using: .utf8) {
-                let base64Credentials = credentialsData.base64EncodedString()
-                request.setValue("Basic \(base64Credentials)", forHTTPHeaderField: "Authorization")
-            }
-        }
-    }
 
     private func substituteTokens(in query: String, tokens: [String: String]) -> String {
         var result = query
@@ -194,28 +200,7 @@ public actor SplunkDataSource: DataSourceProtocol {
 }
 
 // MARK: - Splunk API Response Models
-
-private struct SplunkSearchJobResponse: Codable {
-    let sid: String
-}
-
-private struct SplunkSearchStatusResponse: Codable {
-    let entry: [SplunkSearchStatusEntry]
-}
-
-private struct SplunkSearchStatusEntry: Codable {
-    let content: SplunkSearchStatusContent
-}
-
-private struct SplunkSearchStatusContent: Codable {
-    let isDone: Bool
-    let isFailed: Bool
-
-    enum CodingKeys: String, CodingKey {
-        case isDone = "isDone"
-        case isFailed = "isFailed"
-    }
-}
+// Note: Using types from SplunkIntegration.swift
 
 private struct SplunkSearchResultsResponse: Decodable {
     let results: [[String: Any]]
@@ -233,19 +218,7 @@ private struct SplunkSearchResultsResponse: Decodable {
     }
 }
 
-// MARK: - Dictionary Encoding Extension
-
-extension Dictionary where Key == String, Value == String {
-    func percentEncoded() -> Data? {
-        let encoded = map { key, value in
-            let encodedKey = key.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? key
-            let encodedValue = value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? value
-            return "\(encodedKey)=\(encodedValue)"
-        }.joined(separator: "&")
-
-        return encoded.data(using: .utf8)
-    }
-}
+// MARK: - Data Source Errors
 
 /// Data source error types
 public enum DataSourceError: Error, CustomStringConvertible {
@@ -270,3 +243,5 @@ public enum DataSourceError: Error, CustomStringConvertible {
         }
     }
 }
+
+// NOTE: Dictionary encoding and SSL handling now provided by SplunkIntegration.swift

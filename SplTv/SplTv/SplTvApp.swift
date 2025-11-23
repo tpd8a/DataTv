@@ -34,9 +34,8 @@ struct SplTvApp: App {
         .commands {
             // Add custom menu commands
             CommandGroup(replacing: .newItem) { }
-            
-            // Refresh timer commands disabled until DashboardRefreshWorker migrated
-            /*
+
+            // Refresh timer commands
             CommandGroup(after: .toolbar) {
                 Button("Start All Timers") {
                     DashboardRefreshWorker.shared.startAllRefreshTimers()
@@ -50,7 +49,6 @@ struct SplTvApp: App {
 
                 Divider()
             }
-            */
         }
         
         Settings {
@@ -517,17 +515,6 @@ struct SettingsView: View {
     
     // MARK: - Helper Functions
 
-    /// Create a URLSession configured with SSL settings
-    private func createURLSession() -> URLSession {
-        if splunkAllowInsecure || !splunkValidateSSL {
-            // Use a delegate that bypasses SSL validation
-            let delegate = InsecureURLSessionDelegate()
-            return URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
-        } else {
-            return URLSession.shared
-        }
-    }
-
     private func testSplunkConnection() async {
         isTestingConnection = true
         connectionTestResult = nil
@@ -543,19 +530,10 @@ struct SettingsView: View {
 
             let port = baseURL.port ?? 8089
             let useSSL = baseURL.scheme == "https"
-            let scheme = useSSL ? "https" : "http"
 
-            // Build URL for server info endpoint
-            let testURL = URL(string: "\(scheme)://\(host):\(port)/services/server/info")!
-            var urlComponents = URLComponents(url: testURL, resolvingAgainstBaseURL: true)!
-            urlComponents.queryItems = [URLQueryItem(name: "output_mode", value: "json")]
-
-            var request = URLRequest(url: urlComponents.url!)
-            request.timeoutInterval = splunkTimeout
-
-            // Add authentication
+            // Get credentials
+            let credentials: SplunkCredentials
             if splunkAuthType == "token" {
-                // Token authentication
                 let authToken: String
                 do {
                     authToken = try await CredentialManager.shared.retrieveAuthToken(host: host)
@@ -568,9 +546,8 @@ struct SettingsView: View {
                         return
                     }
                 }
-                request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
+                credentials = .token(authToken)
             } else {
-                // Basic authentication
                 let password: String
                 do {
                     password = try await CredentialManager.shared.retrieveCredentials(host: host, username: splunkUsername)
@@ -583,31 +560,29 @@ struct SettingsView: View {
                         return
                     }
                 }
-
-                let credentials = "\(splunkUsername):\(password)"
-                if let credentialsData = credentials.data(using: .utf8) {
-                    let base64Credentials = credentialsData.base64EncodedString()
-                    request.setValue("Basic \(base64Credentials)", forHTTPHeaderField: "Authorization")
-                }
+                credentials = .basic(username: splunkUsername, password: password)
             }
 
-            // Use custom URLSession with SSL settings
-            let urlSession = createURLSession()
-            let (_, response) = try await urlSession.data(for: request)
+            // Create configuration and auth service
+            let config = SplunkConfiguration(
+                baseURL: baseURL,
+                credentials: credentials,
+                timeout: splunkTimeout,
+                allowInsecureConnections: splunkAllowInsecure,
+                validateSSLCertificate: splunkValidateSSL
+            )
 
-            guard let httpResponse = response as? HTTPURLResponse else {
-                connectionTestResult = .failure(message: "Invalid response from server")
-                isTestingConnection = false
-                return
-            }
+            let restClient = SplunkRestClient(configuration: config)
+            let authService = SplunkAuthenticationService(restClient: restClient)
 
-            if (200...299).contains(httpResponse.statusCode) {
+            // Verify credentials
+            let isValid = try await authService.verifyCredentials()
+
+            if isValid {
                 let authTypeDisplay = splunkAuthType == "token" ? "token" : "username/password"
                 connectionTestResult = .success(message: "Successfully connected to \(host):\(port) using \(authTypeDisplay)")
-            } else if httpResponse.statusCode == 401 {
-                connectionTestResult = .failure(message: "Authentication failed - check credentials")
             } else {
-                connectionTestResult = .failure(message: "Connection failed - server returned status \(httpResponse.statusCode)")
+                connectionTestResult = .failure(message: "Authentication failed - check credentials")
             }
         } catch {
             connectionTestResult = .failure(message: "Connection failed: \(error.localizedDescription)")
@@ -739,25 +714,9 @@ struct SettingsView: View {
                 return
             }
 
-            // Build REST API URL for dashboard listing
-            let port = baseURL.port ?? 8089
-            let useSSL = baseURL.scheme == "https"
-            let scheme = useSSL ? "https" : "http"
-
-            // Use Splunk REST API to list views (dashboards)
-            let restURL = URL(string: "\(scheme)://\(host):\(port)/servicesNS/-/\(splunkDefaultApp)/data/ui/views")!
-            var urlComponents = URLComponents(url: restURL, resolvingAgainstBaseURL: true)!
-            urlComponents.queryItems = [
-                URLQueryItem(name: "output_mode", value: "json"),
-                URLQueryItem(name: "count", value: String(min(syncMaxDashboards, 1000)))
-            ]
-
-            var request = URLRequest(url: urlComponents.url!)
-            request.timeoutInterval = splunkTimeout
-
-            // Add authentication
+            // Create credentials
+            let credentials: SplunkCredentials
             if splunkAuthType == "token" {
-                // Token authentication
                 let authToken: String
                 do {
                     authToken = try await CredentialManager.shared.retrieveAuthToken(host: host)
@@ -766,9 +725,8 @@ struct SettingsView: View {
                     isSyncing = false
                     return
                 }
-                request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
+                credentials = .token(authToken)
             } else {
-                // Basic authentication
                 let password: String
                 do {
                     password = try await CredentialManager.shared.retrieveCredentials(host: host, username: splunkUsername)
@@ -777,69 +735,175 @@ struct SettingsView: View {
                     isSyncing = false
                     return
                 }
-
-                let credentials = "\(splunkUsername):\(password)"
-                if let credentialsData = credentials.data(using: .utf8) {
-                    let base64Credentials = credentialsData.base64EncodedString()
-                    request.setValue("Basic \(base64Credentials)", forHTTPHeaderField: "Authorization")
-                }
+                credentials = .basic(username: splunkUsername, password: password)
             }
 
-            // Use custom URLSession with SSL settings
-            let urlSession = createURLSession()
-            let (data, response) = try await urlSession.data(for: request)
+            // Create Splunk configuration
+            let config = SplunkConfiguration(
+                baseURL: baseURL,
+                credentials: credentials,
+                defaultApp: splunkDefaultApp,
+                defaultOwner: splunkDefaultOwner,
+                timeout: splunkTimeout,
+                allowInsecureConnections: splunkAllowInsecure,
+                validateSSLCertificate: splunkValidateSSL
+            )
 
-            guard let httpResponse = response as? HTTPURLResponse,
-                  (200...299).contains(httpResponse.statusCode) else {
-                syncResult = .failure(message: "Failed to fetch dashboards from Splunk")
+            // Create REST client and dashboard service
+            let restClient = SplunkRestClient(configuration: config)
+            let dashboardService = SplunkDashboardService(restClient: restClient)
+
+            // Create or get DataSourceConfig for this Splunk instance
+            let manager = CoreDataManager.shared
+            let port = baseURL.port ?? 8089
+            // Extract auth token for storage (only if using token auth)
+            let authTokenForStorage: String?
+            if case .token(let token) = credentials {
+                authTokenForStorage = token
+            } else {
+                authTokenForStorage = nil
+            }
+            let dataSourceConfigId = try await manager.saveDataSourceConfig(
+                name: "Splunk - \(host)",
+                type: .splunk,
+                host: host,
+                port: port,
+                authToken: authTokenForStorage,
+                isDefault: true
+            )
+
+            // Register SplunkDataSource with CoreDataManager using the same configuration
+            // This preserves all credentials (token or basic auth) for the metadata fetch
+            let splunkDataSource = SplunkDataSource(configuration: config)
+            await manager.registerDataSource(splunkDataSource, withId: dataSourceConfigId.uuidString)
+
+            print("🔄 Fetching dashboards using filtered search from app: \(splunkDefaultApp)")
+            let dashboardListResponse = try await dashboardService.listDashboards(
+                owner: splunkDefaultOwner,
+                app: splunkDefaultApp
+            )
+
+            let dashboardList = dashboardListResponse.entry
+
+            var syncedCount = 0
+            let maxToSync = max(0, min(dashboardList.count, syncMaxDashboards))
+
+            let startMsg = "🔵 SYNC START: \(dashboardList.count) dashboards (filtered), syncMaxDashboards=\(syncMaxDashboards), maxToSync=\(maxToSync)\n"
+            try? startMsg.data(using: .utf8)?.write(to: URL(fileURLWithPath: "/tmp/sync_debug.log"), options: .atomic)
+
+            guard maxToSync > 0 else {
+                syncResult = .failure(message: "No dashboards to sync (maxToSync=\(maxToSync), syncMaxDashboards=\(syncMaxDashboards))")
                 isSyncing = false
                 return
             }
 
-            // Parse the dashboard list response
-            let dashboardList = try JSONDecoder().decode(SplunkViewsResponse.self, from: data)
-
-            var syncedCount = 0
-            let maxToSync = min(dashboardList.entry.count, syncMaxDashboards)
-
             // Process each dashboard
-            for entry in dashboardList.entry.prefix(maxToSync) {
-                // Apply filters
+            for entry in dashboardList.prefix(maxToSync) {
+                let entryMsg = "📋 Processing '\(entry.name)' by '\(entry.author)'\n"
+                if let data = entryMsg.data(using: .utf8),
+                   let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: "/tmp/sync_debug.log")) {
+                    handle.seekToEndOfFile()
+                    handle.write(data)
+                    try? handle.close()
+                }
+
+                // Apply author filter if needed
                 if !syncIncludePrivate && entry.author != splunkDefaultOwner {
+                    let skipMsg = "⏭️  Skipped (author filter)\n"
+                    if let data = skipMsg.data(using: .utf8),
+                       let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: "/tmp/sync_debug.log")) {
+                        handle.seekToEndOfFile()
+                        handle.write(data)
+                        try? handle.close()
+                    }
                     continue
                 }
 
-                // Get the dashboard XML/JSON content
-                guard let dashboardXML = entry.content.eaiData else {
+                // Get the dashboard XML content
+                let dashboardXML = entry.content.eaiData
+                guard !dashboardXML.isEmpty else {
+                    let noDataMsg = "⏭️  Skipped (no eaiData)\n"
+                    if let data = noDataMsg.data(using: .utf8),
+                       let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: "/tmp/sync_debug.log")) {
+                        handle.seekToEndOfFile()
+                        handle.write(data)
+                        try? handle.close()
+                    }
                     continue
                 }
 
-                // Determine dashboard format
+                // Determine dashboard format by checking the XML content
                 let formatType: String
-                if let rootNode = entry.content.rootNode {
-                    formatType = rootNode == "dashboard" || rootNode == "form" ? "simpleXML" : "dashboardStudio"
+                if dashboardXML.contains("<dashboard version=\"2") {
+                    // Dashboard Studio 2.x format (XML-based)
+                    formatType = "dashboardStudio"
+                } else if dashboardXML.contains("<form") || dashboardXML.contains("<dashboard version=\"1") {
+                    // SimpleXML format (legacy)
+                    formatType = "simpleXML"
                 } else {
+                    // Fallback: assume SimpleXML
                     formatType = "simpleXML"
                 }
-
+                print("🔵 formatType: \(formatType) for '\(entry.name)'")
                 // Save to CoreData using CoreDataManager
                 do {
-                    let manager = await CoreDataManager.shared
-
                     if formatType == "dashboardStudio" {
                         // Parse as Dashboard Studio JSON
-                        let parser = await DashboardStudioParser()
-                        let studioConfig = try await parser.parse(dashboardXML)
-                        _ = try await manager.saveDashboard(studioConfig)
+                        let parser = DashboardStudioParser()
+                        var studioConfig = try await parser.parse(dashboardXML)
+                        print("🔵 studioConfig: \(studioConfig)")
+                        // Use entry.name as fallback if title is empty
+                        if studioConfig.title.isEmpty {
+                            studioConfig = DashboardStudioConfiguration(
+                                title: entry.name,
+                                description: studioConfig.description,
+                                visualizations: studioConfig.visualizations,
+                                dataSources: studioConfig.dataSources,
+                                layout: studioConfig.layout,
+                                inputs: studioConfig.inputs,
+                                defaults: studioConfig.defaults
+                            )
+                        }
+
+                        _ = try await manager.saveDashboard(studioConfig, dataSourceConfigId: dataSourceConfigId, rawJSON: dashboardXML)
                         syncedCount += 1
                     } else {
                         // Parse as Simple XML
+                        let msg = "🟢 About to parse SimpleXML for '\(entry.name)'\n"
+                        try? msg.data(using: .utf8)?.write(to: URL(fileURLWithPath: "/tmp/sync_debug.log"), options: .atomic)
+
                         let parser = SimpleXMLParser()
-                        let simpleXMLConfig = try parser.parse(dashboardXML)
-                        _ = try await manager.saveDashboard(simpleXMLConfig)
+                        var simpleXMLConfig = try parser.parse(dashboardXML)
+                        print("🔵 simpleXMLConfig: \(simpleXMLConfig)")
+                        let parsed = "🟢 Parsed! Label: '\(simpleXMLConfig.label)', Rows: \(simpleXMLConfig.rows.count)\n"
+                        if let data = parsed.data(using: .utf8),
+                           let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: "/tmp/sync_debug.log")) {
+                            handle.seekToEndOfFile()
+                            handle.write(data)
+                            try? handle.close()
+                        }
+
+                        // Use entry.name as fallback if label is empty
+                        if simpleXMLConfig.label.isEmpty {
+                            simpleXMLConfig = SimpleXMLConfiguration(
+                                label: entry.name,
+                                description: simpleXMLConfig.description,
+                                rows: simpleXMLConfig.rows,
+                                fieldsets: simpleXMLConfig.fieldsets
+                            )
+                        }
+
+                        _ = try await manager.saveDashboard(simpleXMLConfig, dataSourceConfigId: dataSourceConfigId, rawXML: dashboardXML)
                         syncedCount += 1
                     }
                 } catch {
+                    let errMsg = "❌ ERROR for '\(entry.name)': \(error)\n"
+                    if let data = errMsg.data(using: .utf8),
+                       let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: "/tmp/sync_debug.log")) {
+                        handle.seekToEndOfFile()
+                        handle.write(data)
+                        try? handle.close()
+                    }
                     print("⚠️ Failed to save dashboard '\(entry.name)': \(error.localizedDescription)")
                 }
             }
@@ -1164,49 +1228,8 @@ struct DashboardExportView: View {
     }
 }
 
-// MARK: - Splunk REST API Response Models
-
-/// Response from Splunk /data/ui/views endpoint
-private struct SplunkViewsResponse: Codable {
-    let entry: [SplunkViewEntry]
-}
-
-private struct SplunkViewEntry: Codable {
-    let name: String
-    let author: String
-    let content: SplunkViewContent
-}
-
-private struct SplunkViewContent: Codable {
-    let eaiData: String?
-    let rootNode: String?
-
-    enum CodingKeys: String, CodingKey {
-        case eaiData = "eai:data"
-        case rootNode
-    }
-}
-
-// MARK: - Insecure URLSession Delegate
-
-/// URLSession delegate that bypasses SSL certificate validation
-/// Used when user has enabled "Allow Insecure Connections" or disabled "Validate SSL Certificates"
-private class InsecureURLSessionDelegate: NSObject, URLSessionDelegate {
-    func urlSession(
-        _ session: URLSession,
-        didReceive challenge: URLAuthenticationChallenge,
-        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
-    ) {
-        // Bypass SSL certificate validation
-        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-           let trust = challenge.protectionSpace.serverTrust {
-            let credential = URLCredential(trust: trust)
-            completionHandler(.useCredential, credential)
-        } else {
-            completionHandler(.performDefaultHandling, nil)
-        }
-    }
-}
+// NOTE: All Splunk API functionality is now in DashboardKit/Managers/SplunkIntegration.swift
+// This includes: SplunkRestClient, SplunkAuthenticationService, SplunkDashboardService, etc.
 
 #endif
 
