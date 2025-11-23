@@ -308,6 +308,36 @@ public actor CoreDataManager {
                         viz.dataSource = dataSource
                         viz.dashboard = dashboard
 
+                        // Store visualization options and formats
+                        var vizOptions: [String: Any] = [:]
+
+                        // Add regular options
+                        if !panel.visualization.options.isEmpty {
+                            vizOptions["options"] = panel.visualization.options
+                        }
+
+                        // Add formats array
+                        if !panel.visualization.formats.isEmpty {
+                            print("💾 Storing \(panel.visualization.formats.count) format(s) for visualization")
+                            // Convert AnyCodable formats to plain dictionaries for JSON serialization
+                            let formatsArray = panel.visualization.formats.map { format -> [String: Any] in
+                                var dict: [String: Any] = [:]
+                                for (key, value) in format {
+                                    dict[key] = value.value
+                                }
+                                return dict
+                            }
+                            vizOptions["formats"] = formatsArray
+                        }
+
+                        // Serialize to JSON and store
+                        if !vizOptions.isEmpty,
+                           let optionsData = try? JSONSerialization.data(withJSONObject: vizOptions),
+                           let optionsString = String(data: optionsData, encoding: .utf8) {
+                            viz.optionsJSON = optionsString
+                            print("💾 Stored optionsJSON: \(optionsString.prefix(200))...")
+                        }
+
                         // Create layout item
                         let layoutItem = LayoutItem(context: context)
                         layoutItem.id = UUID()
