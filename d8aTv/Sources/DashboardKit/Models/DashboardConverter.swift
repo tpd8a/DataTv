@@ -371,7 +371,7 @@ public struct DashboardConverter {
     /// Returns (options, context) with proper nested structures
     private func convertVisualizationOptionsAndFormats(
         options: [String: String],
-        formats: [[String: Any]]
+        formats: [[String: AnyCodable]]
     ) -> (options: [String: AnyCodable]?, context: [String: AnyCodable]?) {
 
         // Convert simple options - parse strings back to proper types

@@ -40,10 +40,10 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
     private var currentTitle: String?
 
     // Format extraction state
-    private var currentFormats: [[String: Any]] = []
-    private var currentFormatElement: [String: Any] = [:]
-    private var currentPaletteElement: [String: Any] = [:]
-    private var currentScaleElement: [String: Any] = [:]
+    private var currentFormats: [[String: AnyCodable]] = []
+    private var currentFormatElement: [String: AnyCodable] = [:]
+    private var currentPaletteElement: [String: AnyCodable] = [:]
+    private var currentScaleElement: [String: AnyCodable] = [:]
     private var inFormatElement = false
     private var inPaletteElement = false
     private var inScaleElement = false
@@ -166,40 +166,40 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
             // Start a new format element
             currentFormatElement = [:]
             if let type = attributes["type"] {
-                currentFormatElement["type"] = type
+                currentFormatElement["type"] = AnyCodable(type)
             }
             if let field = attributes["field"] {
-                currentFormatElement["field"] = field
+                currentFormatElement["field"] = AnyCodable(field)
             }
             inFormatElement = true
         case "colorPalette":
             currentPaletteElement = [:]
             if let paletteType = attributes["type"] {
-                currentPaletteElement["type"] = paletteType
+                currentPaletteElement["type"] = AnyCodable(paletteType)
             }
             if let minColor = attributes["minColor"] {
-                currentPaletteElement["minColor"] = minColor
+                currentPaletteElement["minColor"] = AnyCodable(minColor)
             }
             if let midColor = attributes["midColor"] {
-                currentPaletteElement["midColor"] = midColor
+                currentPaletteElement["midColor"] = AnyCodable(midColor)
             }
             if let maxColor = attributes["maxColor"] {
-                currentPaletteElement["maxColor"] = maxColor
+                currentPaletteElement["maxColor"] = AnyCodable(maxColor)
             }
             inPaletteElement = true
         case "scale":
             currentScaleElement = [:]
             if let scaleType = attributes["type"] {
-                currentScaleElement["type"] = scaleType
+                currentScaleElement["type"] = AnyCodable(scaleType)
             }
             if let minValue = attributes["minValue"], let min = Double(minValue) {
-                currentScaleElement["minValue"] = min
+                currentScaleElement["minValue"] = AnyCodable(min)
             }
             if let midValue = attributes["midValue"], let mid = Double(midValue) {
-                currentScaleElement["midValue"] = mid
+                currentScaleElement["midValue"] = AnyCodable(mid)
             }
             if let maxValue = attributes["maxValue"], let max = Double(maxValue) {
-                currentScaleElement["maxValue"] = max
+                currentScaleElement["maxValue"] = AnyCodable(max)
             }
             inScaleElement = true
         default:
@@ -352,7 +352,7 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
         case "option":
             // Handle options within format elements
             if inFormatElement, let name = currentAttributes["name"] {
-                currentFormatElement[name] = currentCharacters
+                currentFormatElement[name] = AnyCodable(currentCharacters)
             } else if let name = currentAttributes["name"] {
                 currentOptions[name] = currentCharacters
             }
@@ -380,7 +380,7 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
                         }
                     }
                     if !mapping.isEmpty {
-                        currentPaletteElement["mapping"] = mapping
+                        currentPaletteElement["mapping"] = AnyCodable(mapping)
                     }
                 } else {
                     // Array format: [#COLOR1,#COLOR2,...]
@@ -390,12 +390,12 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
                         .filter { !$0.isEmpty }
 
                     if !colorArray.isEmpty {
-                        currentPaletteElement["colors"] = colorArray
+                        currentPaletteElement["colors"] = AnyCodable(colorArray)
                     }
                 }
             }
             if !currentPaletteElement.isEmpty {
-                currentFormatElement["palette"] = currentPaletteElement
+                currentFormatElement["palette"] = AnyCodable(currentPaletteElement)
             }
             inPaletteElement = false
 
@@ -407,11 +407,11 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
                     .compactMap { Double($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
 
                 if !thresholdArray.isEmpty {
-                    currentScaleElement["values"] = thresholdArray
+                    currentScaleElement["values"] = AnyCodable(thresholdArray)
                 }
             }
             if !currentScaleElement.isEmpty {
-                currentFormatElement["scale"] = currentScaleElement
+                currentFormatElement["scale"] = AnyCodable(currentScaleElement)
             }
             inScaleElement = false
 

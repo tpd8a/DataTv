@@ -1065,10 +1065,16 @@ public class DashboardLoader {
                     (vizOptions, formatOptions) = extractOptionsAndFormatsFromStructure(extracted)
                 }
 
+                // Convert formatOptions to AnyCodable format
+                let formatsAnyCodable: [[String: AnyCodable]] = formatOptions.isEmpty ? [] :
+                    formatOptions.map { (key, value) -> [String: AnyCodable] in
+                        return ["key": AnyCodable(key), "value": AnyCodable(value)]
+                    }
+
                 let visualization = SimpleXMLVisualization(
                     type: vizType,
                     options: vizOptions,
-                    formatElements: formatOptions
+                    formats: formatsAnyCodable
                 )
                 let panel = SimpleXMLPanel(
                     title: title,
