@@ -1080,8 +1080,30 @@ public actor CoreDataManager {
 
         // Build search parameters
         // Use timeRange parameter if provided, otherwise use extracted values from DataSource
-        let finalEarliest = timeRange?.earliest ?? extractedEarliest
-        let finalLatest = timeRange?.latest ?? extractedLatest
+        var finalEarliest = timeRange?.earliest ?? extractedEarliest
+        var finalLatest = timeRange?.latest ?? extractedLatest
+
+        // Apply token substitutions to time range values
+        if let earliest = finalEarliest {
+            var substituted = earliest
+            for (token, value) in userTokenValues {
+                substituted = substituted.replacingOccurrences(of: "$\(token)$", with: value)
+            }
+            finalEarliest = substituted
+            if substituted != earliest {
+                print("🎛️ Substituted earliest: '\(earliest)' → '\(substituted)'")
+            }
+        }
+        if let latest = finalLatest {
+            var substituted = latest
+            for (token, value) in userTokenValues {
+                substituted = substituted.replacingOccurrences(of: "$\(token)$", with: value)
+            }
+            finalLatest = substituted
+            if substituted != latest {
+                print("🎛️ Substituted latest: '\(latest)' → '\(substituted)'")
+            }
+        }
 
         let parameters = SearchParameters(
             earliestTime: finalEarliest,
