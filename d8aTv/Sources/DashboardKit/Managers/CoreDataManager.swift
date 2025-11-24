@@ -381,8 +381,44 @@ public actor CoreDataManager {
                             if let handlerData = try? JSONEncoder().encode(changeHandler),
                                let handlerDict = try? JSONSerialization.jsonObject(with: handlerData) as? [String: Any] {
                                 inputOptions["changeHandler"] = handlerDict
-                                print("💾 Storing change handler for input: \(simpleInput.token)")
+                                print("💾 Storing change handler for panel input: \(simpleInput.token)")
                             }
+                        }
+
+                        // Create DataSource for input search if present
+                        if let inputSearch = simpleInput.search {
+                            let searchSourceId = "input_search_\(simpleInput.token)"
+                            let dataSource = DataSource(context: context)
+                            dataSource.id = UUID()
+                            dataSource.sourceId = searchSourceId
+                            dataSource.type = "ds.search"
+                            dataSource.query = inputSearch.query
+                            dataSource.refresh = inputSearch.refresh
+                            dataSource.refreshType = inputSearch.refreshType
+                            dataSource.dashboard = dashboard
+
+                            // Store earliest/latest in optionsJSON
+                            var searchOptions: [String: Any] = [:]
+                            if let earliest = inputSearch.earliest {
+                                searchOptions["earliest"] = earliest
+                            }
+                            if let latest = inputSearch.latest {
+                                searchOptions["latest"] = latest
+                            }
+                            if !searchOptions.isEmpty,
+                               let optionsData = try? JSONSerialization.data(withJSONObject: searchOptions),
+                               let optionsString = String(data: optionsData, encoding: .utf8) {
+                                dataSource.optionsJSON = optionsString
+                            }
+
+                            // Add search metadata to input options
+                            inputOptions["choiceSearch"] = [
+                                "sourceId": searchSourceId,
+                                "fieldForLabel": simpleInput.fieldForLabel ?? simpleInput.fieldForValue ?? "value",
+                                "fieldForValue": simpleInput.fieldForValue ?? "value"
+                            ]
+
+                            print("💾 Created DataSource for panel input search: \(searchSourceId)")
                         }
 
                         if !inputOptions.isEmpty,
@@ -438,6 +474,42 @@ public actor CoreDataManager {
                                 inputOptions["changeHandler"] = handlerDict
                                 print("💾 Storing change handler for fieldset input: \(simpleInput.token)")
                             }
+                        }
+
+                        // Create DataSource for input search if present
+                        if let inputSearch = simpleInput.search {
+                            let searchSourceId = "input_search_\(simpleInput.token)"
+                            let dataSource = DataSource(context: context)
+                            dataSource.id = UUID()
+                            dataSource.sourceId = searchSourceId
+                            dataSource.type = "ds.search"
+                            dataSource.query = inputSearch.query
+                            dataSource.refresh = inputSearch.refresh
+                            dataSource.refreshType = inputSearch.refreshType
+                            dataSource.dashboard = dashboard
+
+                            // Store earliest/latest in optionsJSON
+                            var searchOptions: [String: Any] = [:]
+                            if let earliest = inputSearch.earliest {
+                                searchOptions["earliest"] = earliest
+                            }
+                            if let latest = inputSearch.latest {
+                                searchOptions["latest"] = latest
+                            }
+                            if !searchOptions.isEmpty,
+                               let optionsData = try? JSONSerialization.data(withJSONObject: searchOptions),
+                               let optionsString = String(data: optionsData, encoding: .utf8) {
+                                dataSource.optionsJSON = optionsString
+                            }
+
+                            // Add search metadata to input options
+                            inputOptions["choiceSearch"] = [
+                                "sourceId": searchSourceId,
+                                "fieldForLabel": simpleInput.fieldForLabel ?? simpleInput.fieldForValue ?? "value",
+                                "fieldForValue": simpleInput.fieldForValue ?? "value"
+                            ]
+
+                            print("💾 Created DataSource for input search: \(searchSourceId)")
                         }
 
                         if !inputOptions.isEmpty,

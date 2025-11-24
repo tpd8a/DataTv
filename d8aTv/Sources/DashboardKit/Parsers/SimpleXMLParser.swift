@@ -177,7 +177,7 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
             currentPanelInputs = []  // Reset panel inputs for new panel
         case "search":
             // Check if this is a search within an input (for populating choices)
-            if inInputBlock {
+            if elementStack.contains("input") {
                 inInputSearchBlock = true
                 currentInputSearch = nil
             }
