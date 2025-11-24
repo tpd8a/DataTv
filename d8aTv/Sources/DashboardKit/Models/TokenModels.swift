@@ -1,5 +1,8 @@
 import Foundation
 
+// Import change handler types from SimpleXMLModels
+// These are in the same module (DashboardKit), so no explicit import needed
+
 // MARK: - Token Definition Types
 
 /// Scope of token visibility in dashboard
@@ -224,5 +227,110 @@ public actor TokenResolver {
         }
 
         return tokens
+    }
+
+    /// Execute a change handler, applying variable substitution and condition matching
+    /// - Parameters:
+    ///   - handler: The change handler to execute
+    ///   - selectedValue: The value of the selected choice
+    ///   - selectedLabel: The label of the selected choice
+    /// - Returns: A dictionary of token names and values that should be set/unset
+    public func executeChangeHandler(
+        _ handler: InputChangeHandler,
+        selectedValue: String,
+        selectedLabel: String
+    ) -> [String: String?] {
+        var tokenUpdates: [String: String?] = [:]
+
+        // Helper function to perform variable substitution
+        func substitute(_ input: String?) -> String? {
+            guard var result = input else { return nil }
+
+            // Replace $label$
+            result = result.replacingOccurrences(of: "$label$", with: selectedLabel)
+
+            // Replace $value$
+            result = result.replacingOccurrences(of: "$value$", with: selectedValue)
+
+            // Replace $form.xxx$ with current token values
+            for (tokenName, tokenValue) in tokenValues {
+                let formToken = "$form.\(tokenName)$"
+                result = result.replacingOccurrences(of: formToken, with: tokenValue)
+            }
+
+            return result
+        }
+
+        // Execute unconditional actions first
+        for action in handler.unconditionalActions {
+            switch action.type {
+            case .set:
+                tokenUpdates[action.token] = substitute(action.value)
+            case .unset:
+                tokenUpdates[action.token] = nil
+            case .eval:
+                // For eval, substitute variables in the expression
+                // In a full implementation, we would evaluate the expression
+                // For now, just perform substitution
+                tokenUpdates[action.token] = substitute(action.value)
+            case .link:
+                // Link actions don't set tokens, they trigger navigation
+                // This would need to be handled at the UI level
+                break
+            }
+        }
+
+        // Check conditions and execute matching actions
+        for condition in handler.conditions {
+            var matches = false
+
+            switch condition.matchType {
+            case .label:
+                matches = (selectedLabel == condition.matchValue)
+            case .value:
+                matches = (selectedValue == condition.matchValue)
+            case .match:
+                // Regex match on value
+                if let regex = try? NSRegularExpression(pattern: condition.matchValue) {
+                    let nsValue = selectedValue as NSString
+                    matches = regex.firstMatch(
+                        in: selectedValue,
+                        range: NSRange(location: 0, length: nsValue.length)
+                    ) != nil
+                }
+            }
+
+            // If condition matches, execute its actions (first match wins)
+            if matches {
+                for action in condition.actions {
+                    switch action.type {
+                    case .set:
+                        tokenUpdates[action.token] = substitute(action.value)
+                    case .unset:
+                        tokenUpdates[action.token] = nil
+                    case .eval:
+                        tokenUpdates[action.token] = substitute(action.value)
+                    case .link:
+                        // Link actions don't set tokens
+                        break
+                    }
+                }
+                // Stop after first matching condition (Splunk behavior)
+                break
+            }
+        }
+
+        return tokenUpdates
+    }
+
+    /// Apply token updates from a change handler execution
+    public func applyTokenUpdates(_ updates: [String: String?]) {
+        for (token, value) in updates {
+            if let value = value {
+                tokenValues[token] = value
+            } else {
+                tokenValues.removeValue(forKey: token)
+            }
+        }
     }
 }
