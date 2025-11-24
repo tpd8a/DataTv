@@ -34,15 +34,18 @@ public struct SimpleXMLPanel: Sendable {
     public let title: String?
     public let visualization: SimpleXMLVisualization
     public let search: SimpleXMLSearch?
+    public let inputs: [SimpleXMLInput]
 
     public init(
         title: String? = nil,
         visualization: SimpleXMLVisualization,
-        search: SimpleXMLSearch? = nil
+        search: SimpleXMLSearch? = nil,
+        inputs: [SimpleXMLInput] = []
     ) {
         self.title = title
         self.visualization = visualization
         self.search = search
+        self.inputs = inputs
     }
 }
 

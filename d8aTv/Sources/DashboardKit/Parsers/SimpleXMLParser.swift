@@ -19,6 +19,7 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
     private var currentSearch: SimpleXMLSearch?
     private var currentFieldset: SimpleXMLFieldset?
     private var currentInputs: [SimpleXMLInput] = []
+    private var currentPanelInputs: [SimpleXMLInput] = []  // Panel-level inputs
     private var currentOptions: [String: String] = [:]
     private var currentCharacters = ""
 
@@ -72,6 +73,7 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
         currentSearch = nil
         currentFieldset = nil
         currentInputs = []
+        currentPanelInputs = []
         currentOptions = [:]
         elementStack = []
         currentQuery = ""
@@ -144,6 +146,7 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
             currentPanel = nil
             currentOptions = [:]
             currentFormats = []  // Reset formats for new panel
+            currentPanelInputs = []  // Reset panel inputs for new panel
         case "search":
             currentSearch = nil
             currentQuery = ""
@@ -307,12 +310,15 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
             currentPanel = SimpleXMLPanel(
                 title: currentTitle ?? currentAttributes["title"],
                 visualization: visualization,
-                search: currentSearch
+                search: currentSearch,
+                inputs: currentPanelInputs
             )
+            print("📝 Panel created with \(currentPanelInputs.count) input(s)")
             currentOptions = [:]
             currentFormats = []
             currentSearch = nil
             currentTitle = nil
+            currentPanelInputs = []  // Reset after using
 
         case "panel":
             if let panel = currentPanel {
@@ -336,7 +342,15 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
                 searchWhenChanged: currentInputAttributes["searchWhenChanged"] != "false",
                 choices: currentInputChoices
             )
-            currentInputs.append(input)
+
+            // Determine context: if we're inside a panel (not fieldset), add to panel inputs
+            if elementStack.contains("panel") && !elementStack.contains("fieldset") {
+                currentPanelInputs.append(input)
+                print("📝 Added panel input: \(input.token)")
+            } else {
+                currentInputs.append(input)
+                print("📝 Added fieldset input: \(input.token)")
+            }
 
         case "fieldset":
             let submitButton = currentAttributes["submitButton"] == "true"
