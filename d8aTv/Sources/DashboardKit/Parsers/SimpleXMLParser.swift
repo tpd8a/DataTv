@@ -37,6 +37,16 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
     private var currentInputAttributes: [String: String] = [:]
     private var currentInputChoices: [SimpleXMLInputChoice] = []
 
+    // Change handler parsing state
+    private var inChangeBlock = false
+    private var inConditionBlock = false
+    private var currentChangeActions: [ChangeAction] = []  // Top-level unconditional actions
+    private var currentConditionActions: [ChangeAction] = []  // Actions within current condition
+    private var currentConditions: [ChangeCondition] = []
+    private var currentConditionMatch: (type: ConditionMatchType, value: String)?
+    private var currentActionType: ChangeActionType?
+    private var currentActionToken: String?
+
     // Temporary storage for panel/viz title
     private var currentTitle: String?
 
@@ -86,6 +96,14 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
         currentInputDefault = nil
         currentInputAttributes = [:]
         currentInputChoices = []
+        inChangeBlock = false
+        inConditionBlock = false
+        currentChangeActions = []
+        currentConditionActions = []
+        currentConditions = []
+        currentConditionMatch = nil
+        currentActionType = nil
+        currentActionToken = nil
         currentFormats = []
         currentFormatElement = [:]
         currentPaletteElement = [:]
@@ -165,6 +183,35 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
             currentInputDefault = nil
             currentInputAttributes = attributes  // Save input's attributes before they get overwritten
             currentInputChoices = []
+            currentChangeActions = []
+            currentConditions = []
+        case "change":
+            inChangeBlock = true
+            currentChangeActions = []
+            currentConditions = []
+        case "condition":
+            inConditionBlock = true
+            currentConditionActions = []
+            // Determine condition type from attributes
+            if let label = attributes["label"] {
+                currentConditionMatch = (.label, label)
+            } else if let value = attributes["value"] {
+                currentConditionMatch = (.value, value)
+            } else if let match = attributes["match"] {
+                currentConditionMatch = (.match, match)
+            }
+        case "set":
+            currentActionType = .set
+            currentActionToken = attributes["token"] ?? ""
+        case "unset":
+            currentActionType = .unset
+            currentActionToken = attributes["token"] ?? ""
+        case "eval":
+            currentActionType = .eval
+            currentActionToken = attributes["token"] ?? ""
+        case "link":
+            currentActionType = .link
+            currentActionToken = ""  // Link doesn't have token attribute
         case "format":
             // Start a new format element
             currentFormatElement = [:]
@@ -333,6 +380,17 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
             currentRow = []
 
         case "input":
+            // Build change handler if we have actions or conditions
+            let changeHandler: InputChangeHandler? = {
+                if !currentChangeActions.isEmpty || !currentConditions.isEmpty {
+                    return InputChangeHandler(
+                        unconditionalActions: currentChangeActions,
+                        conditions: currentConditions
+                    )
+                }
+                return nil
+            }()
+
             let inputType = SimpleXMLInputType(rawValue: currentInputAttributes["type"] ?? "text") ?? .text
             let input = SimpleXMLInput(
                 type: inputType,
@@ -340,8 +398,13 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
                 label: currentInputLabel ?? currentInputAttributes["label"],
                 defaultValue: currentInputDefault ?? currentInputAttributes["default"],
                 searchWhenChanged: currentInputAttributes["searchWhenChanged"] != "false",
-                choices: currentInputChoices
+                choices: currentInputChoices,
+                changeHandler: changeHandler
             )
+
+            if changeHandler != nil {
+                print("📝 Input \(input.token) has change handler: \(currentChangeActions.count) actions, \(currentConditions.count) conditions")
+            }
 
             // Determine context: if we're inside a panel (not fieldset), add to panel inputs
             if elementStack.contains("panel") && !elementStack.contains("fieldset") {
@@ -362,6 +425,50 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
             )
             fieldsets.append(fieldset)
             currentInputs = []
+
+        case "set", "unset", "eval", "link":
+            // Create action from accumulated values
+            guard let actionType = currentActionType, !currentActionToken.isEmpty || actionType == .link else {
+                break
+            }
+
+            let action = ChangeAction(
+                type: actionType,
+                token: currentActionToken,
+                value: currentCharacters.isEmpty ? nil : currentCharacters
+            )
+
+            // Add to appropriate list
+            if inConditionBlock {
+                currentConditionActions.append(action)
+                print("📝 Added condition action: \(actionType.rawValue) token=\(currentActionToken)")
+            } else if inChangeBlock {
+                currentChangeActions.append(action)
+                print("📝 Added unconditional action: \(actionType.rawValue) token=\(currentActionToken)")
+            }
+
+            currentActionType = nil
+            currentActionToken = nil
+
+        case "condition":
+            // Complete condition block
+            if let match = currentConditionMatch, !currentConditionActions.isEmpty {
+                let condition = ChangeCondition(
+                    matchType: match.type,
+                    matchValue: match.value,
+                    actions: currentConditionActions
+                )
+                currentConditions.append(condition)
+                print("📝 Added condition: \(match.type.rawValue)=\(match.value) with \(currentConditionActions.count) actions")
+            }
+            inConditionBlock = false
+            currentConditionActions = []
+            currentConditionMatch = nil
+
+        case "change":
+            // Change block complete (actions already accumulated)
+            inChangeBlock = false
+            print("📝 Completed change block: \(currentChangeActions.count) unconditional actions, \(currentConditions.count) conditions")
 
         case "option":
             // Handle options within format elements

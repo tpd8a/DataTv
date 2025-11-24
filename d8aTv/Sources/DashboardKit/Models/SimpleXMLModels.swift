@@ -129,6 +129,7 @@ public struct SimpleXMLInput: Sendable {
     public let defaultValue: String?
     public let searchWhenChanged: Bool
     public let choices: [SimpleXMLInputChoice]  // Dropdown/radio choices
+    public let changeHandler: InputChangeHandler?  // Change event actions
 
     public init(
         type: SimpleXMLInputType,
@@ -136,7 +137,8 @@ public struct SimpleXMLInput: Sendable {
         label: String? = nil,
         defaultValue: String? = nil,
         searchWhenChanged: Bool = true,
-        choices: [SimpleXMLInputChoice] = []
+        choices: [SimpleXMLInputChoice] = [],
+        changeHandler: InputChangeHandler? = nil
     ) {
         self.type = type
         self.token = token
@@ -144,6 +146,7 @@ public struct SimpleXMLInput: Sendable {
         self.defaultValue = defaultValue
         self.searchWhenChanged = searchWhenChanged
         self.choices = choices
+        self.changeHandler = changeHandler
     }
 }
 
@@ -166,4 +169,58 @@ public enum SimpleXMLInputType: String, Sendable {
     case multiselect
     case text
     case checkbox
+}
+
+// MARK: - Input Change Handlers
+
+/// Action type for input change handlers
+public enum ChangeActionType: String, Sendable, Codable {
+    case set
+    case unset
+    case eval
+    case link
+}
+
+/// Single action within a change handler
+public struct ChangeAction: Sendable, Codable, Equatable {
+    public let type: ChangeActionType
+    public let token: String
+    public let value: String?  // For set/eval/link, can contain $label$, $value$, $form.xxx$
+
+    public init(type: ChangeActionType, token: String, value: String? = nil) {
+        self.type = type
+        self.token = token
+        self.value = value
+    }
+}
+
+/// Condition match type
+public enum ConditionMatchType: String, Sendable, Codable {
+    case label      // Match on choice label
+    case value      // Match on choice value
+    case match      // Regex match on value
+}
+
+/// Conditional block with actions
+public struct ChangeCondition: Sendable, Codable, Equatable {
+    public let matchType: ConditionMatchType
+    public let matchValue: String  // Label, value, or regex pattern
+    public let actions: [ChangeAction]
+
+    public init(matchType: ConditionMatchType, matchValue: String, actions: [ChangeAction]) {
+        self.matchType = matchType
+        self.matchValue = matchValue
+        self.actions = actions
+    }
+}
+
+/// Complete change handler for an input
+public struct InputChangeHandler: Sendable, Codable, Equatable {
+    public let unconditionalActions: [ChangeAction]  // Top-level actions, execute always
+    public let conditions: [ChangeCondition]          // Conditional blocks
+
+    public init(unconditionalActions: [ChangeAction] = [], conditions: [ChangeCondition] = []) {
+        self.unconditionalActions = unconditionalActions
+        self.conditions = conditions
+    }
 }
