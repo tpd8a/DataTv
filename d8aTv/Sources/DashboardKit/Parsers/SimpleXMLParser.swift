@@ -34,8 +34,13 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
     // Temporary storage for input attributes
     private var currentInputLabel: String?
     private var currentInputDefault: String?
+    private var currentInputInitialValue: String?
+    private var currentInputFieldForLabel: String?
+    private var currentInputFieldForValue: String?
+    private var currentInputSearch: SimpleXMLSearch?
     private var currentInputAttributes: [String: String] = [:]
     private var currentInputChoices: [SimpleXMLInputChoice] = []
+    private var inInputSearchBlock = false
 
     // Change handler parsing state
     private var inChangeBlock = false
@@ -94,8 +99,13 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
         currentRefreshType = nil
         currentInputLabel = nil
         currentInputDefault = nil
+        currentInputInitialValue = nil
+        currentInputFieldForLabel = nil
+        currentInputFieldForValue = nil
+        currentInputSearch = nil
         currentInputAttributes = [:]
         currentInputChoices = []
+        inInputSearchBlock = false
         inChangeBlock = false
         inConditionBlock = false
         currentChangeActions = []
@@ -166,6 +176,11 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
             currentFormats = []  // Reset formats for new panel
             currentPanelInputs = []  // Reset panel inputs for new panel
         case "search":
+            // Check if this is a search within an input (for populating choices)
+            if inInputBlock {
+                inInputSearchBlock = true
+                currentInputSearch = nil
+            }
             currentSearch = nil
             currentQuery = ""
             currentEarliest = nil
@@ -181,10 +196,15 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
             currentOptions = [:]
             currentInputLabel = nil
             currentInputDefault = nil
+            currentInputInitialValue = nil
+            currentInputFieldForLabel = nil
+            currentInputFieldForValue = nil
+            currentInputSearch = nil
             currentInputAttributes = attributes  // Save input's attributes before they get overwritten
             currentInputChoices = []
             currentChangeActions = []
             currentConditions = []
+            inInputSearchBlock = false
         case "change":
             inChangeBlock = true
             currentChangeActions = []
@@ -312,17 +332,32 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
                 currentInputChoices.append(SimpleXMLInputChoice(value: value, label: label))
             }
 
-        case "default", "initialValue":
+        case "default":
             // Could be input default or search default - check parent
             if elementStack.count > 1 && elementStack[elementStack.count - 2] == "input" {
                 currentInputDefault = currentCharacters
+            }
+
+        case "initialValue":
+            if elementStack.count > 1 && elementStack[elementStack.count - 2] == "input" {
+                currentInputInitialValue = currentCharacters
+            }
+
+        case "fieldForLabel":
+            if elementStack.count > 1 && elementStack[elementStack.count - 2] == "input" {
+                currentInputFieldForLabel = currentCharacters
+            }
+
+        case "fieldForValue":
+            if elementStack.count > 1 && elementStack[elementStack.count - 2] == "input" {
+                currentInputFieldForValue = currentCharacters
             }
 
         case "search":
             // Use accumulated values from child elements or saved search attributes
             print("🔍 Parser: Creating search with base=\(searchAttributes["base"] ?? "nil"), ref=\(searchAttributes["ref"] ?? "nil"), id=\(searchAttributes["id"] ?? "nil")")
 
-            currentSearch = SimpleXMLSearch(
+            let search = SimpleXMLSearch(
                 query: currentQuery,
                 earliest: currentEarliest ?? searchAttributes["earliest"],
                 latest: currentLatest ?? searchAttributes["latest"],
@@ -332,6 +367,15 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
                 base: searchAttributes["base"],
                 ref: searchAttributes["ref"]
             )
+
+            // Determine if this is an input search or a panel search
+            if inInputSearchBlock {
+                currentInputSearch = search
+                inInputSearchBlock = false
+                print("📊 Parser: Attached search to input for dynamic choices")
+            } else {
+                currentSearch = search
+            }
 
             print("🔍 Parser: Created search: base=\(currentSearch?.base ?? "nil"), ref=\(currentSearch?.ref ?? "nil"), id=\(currentSearch?.id ?? "nil")")
 
@@ -397,13 +441,21 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
                 token: currentInputAttributes["token"] ?? "",
                 label: currentInputLabel ?? currentInputAttributes["label"],
                 defaultValue: currentInputDefault ?? currentInputAttributes["default"],
+                initialValue: currentInputInitialValue,
                 searchWhenChanged: currentInputAttributes["searchWhenChanged"] != "false",
                 choices: currentInputChoices,
-                changeHandler: changeHandler
+                changeHandler: changeHandler,
+                search: currentInputSearch,
+                fieldForLabel: currentInputFieldForLabel,
+                fieldForValue: currentInputFieldForValue
             )
 
             if changeHandler != nil {
                 print("📝 Input \(input.token) has change handler: \(currentChangeActions.count) actions, \(currentConditions.count) conditions")
+            }
+
+            if currentInputSearch != nil {
+                print("📊 Input \(input.token) has dynamic search with fieldForLabel=\(currentInputFieldForLabel ?? "nil"), fieldForValue=\(currentInputFieldForValue ?? "nil")")
             }
 
             // Determine context: if we're inside a panel (not fieldset), add to panel inputs
