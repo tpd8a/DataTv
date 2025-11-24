@@ -67,9 +67,10 @@ extension Visualization {
     ) -> Visualization? {
         let request: NSFetchRequest<Visualization> = Visualization.fetchRequest()
         request.predicate = NSPredicate(
-            format: "dataSource == %@ AND type == %@",
+            format: "dataSource == %@ AND (type == %@ OR type == %@)",
             dataSource,
-            "table"
+            "table",
+            "splunk.table"
         )
         request.fetchLimit = 1
 

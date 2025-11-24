@@ -162,7 +162,7 @@ public struct DashboardConverter {
                 // Convert options and formats to Studio format with proper structure
                 let (vizOptions, vizContext) = convertVisualizationOptionsAndFormats(
                     options: panel.visualization.options,
-                    formatElements: panel.visualization.formatElements
+                    formats: panel.visualization.formats
                 )
 
                 let visualization = VisualizationDefinition(
@@ -371,7 +371,7 @@ public struct DashboardConverter {
     /// Returns (options, context) with proper nested structures
     private func convertVisualizationOptionsAndFormats(
         options: [String: String],
-        formatElements: [String: String]
+        formats: [[String: AnyCodable]]
     ) -> (options: [String: AnyCodable]?, context: [String: AnyCodable]?) {
 
         // Convert simple options - parse strings back to proper types
@@ -391,78 +391,27 @@ public struct DashboardConverter {
             }
         }
 
-        // Build context from format elements
-        var context: [String: Any] = [:]
-        var columnFormat: [String: Any] = [:]
-
-        // Group format elements by field
-        var fieldFormats: [String: [String: String]] = [:]
-        for (key, value) in formatElements {
-            let parts = key.split(separator: ".").map(String.init)
-            guard parts.count >= 3, parts[0] == "format" else { continue }
-
-            let field = parts[1]
-            let property = parts[2...].joined(separator: ".")
-
-            if fieldFormats[field] == nil {
-                fieldFormats[field] = [:]
-            }
-            fieldFormats[field]?[property] = value
+        // Store formats directly in options with proper structure
+        // This preserves the format data for VisualizationFormatting to use
+        if !formats.isEmpty {
+            print("📊 Converting \(formats.count) format elements")
+            studioOptions["formats"] = AnyCodable(formats)
         }
 
-        // Convert each field's format to context and columnFormat
-        for (field, formats) in fieldFormats {
-            if let type = formats["type"] {
-                switch type {
-                case "color":
-                    let (contextConfig, formatConfig) = convertColorFormat(field: field, formats: formats)
-                    if let config = contextConfig {
-                        context["\(field)ColumnColorConfig"] = config
-                    }
-                    if let format = formatConfig {
-                        if columnFormat[field] == nil {
-                            columnFormat[field] = [:]
-                        }
-                        if var fieldFormat = columnFormat[field] as? [String: Any] {
-                            fieldFormat["rowBackgroundColors"] = format
-                            columnFormat[field] = fieldFormat
-                        }
-                    }
-
-                case "number":
-                    let (contextConfig, formatConfig) = convertNumberFormat(field: field, formats: formats)
-                    if let config = contextConfig {
-                        context["\(field)ColumnNumberConfig"] = config
-                    }
-                    if let format = formatConfig {
-                        if columnFormat[field] == nil {
-                            columnFormat[field] = [:]
-                        }
-                        if var fieldFormat = columnFormat[field] as? [String: Any] {
-                            fieldFormat["data"] = format
-                            columnFormat[field] = fieldFormat
-                        }
-                    }
-
-                default:
-                    break
-                }
-            }
-        }
-
-        // Add columnFormat to options if we have any
-        if !columnFormat.isEmpty {
-            studioOptions["columnFormat"] = AnyCodable(columnFormat)
-        }
-
-        // Convert context to AnyCodable
+        // Also add to context for Studio compatibility
         var studioContext: [String: AnyCodable]? = nil
-        if !context.isEmpty {
+        if !formats.isEmpty {
             studioContext = [:]
-            for (key, value) in context {
-                studioContext?[key] = AnyCodable(value)
-            }
+            studioContext?["formats"] = AnyCodable(formats)
         }
+
+        // Legacy: Also populate options dict at top level for backward compatibility
+        if !options.isEmpty {
+            let optionsDict = options.mapValues { AnyCodable($0) }
+            studioOptions["options"] = AnyCodable(optionsDict)
+        }
+
+        print("📊 Studio options keys: \(studioOptions.keys.joined(separator: ", "))")
 
         return (
             studioOptions.isEmpty ? nil : studioOptions,

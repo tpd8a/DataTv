@@ -1040,7 +1040,7 @@ public class DashboardLoader {
 
                 // Check for different viz types and extract options
                 var vizOptions: [String: String] = [:]
-                var formatOptions: [String: String] = [:]
+                var formatsArray: [[String: Any]] = []
 
                 if let tableElement = panelElement.element(named: "table") {
                     vizType = .table
@@ -1048,28 +1048,44 @@ public class DashboardLoader {
                         search = parseSearch(from: searchElement)
                     }
                     let extracted = tableElement.extractAllOptions()
-                    (vizOptions, formatOptions) = extractOptionsAndFormatsFromStructure(extracted)
+                    print("🔍 DashboardLoader: extracted = \(extracted)")
+                    vizOptions = extracted["options"] as? [String: String] ?? [:]
+                    formatsArray = extracted["formats"] as? [[String: Any]] ?? []
+                    print("🔍 DashboardLoader: found \(formatsArray.count) format(s) for table")
                 } else if let chartElement = panelElement.element(named: "chart") {
                     vizType = .chart
                     if let searchElement = chartElement.element(named: "search") {
                         search = parseSearch(from: searchElement)
                     }
                     let extracted = chartElement.extractAllOptions()
-                    (vizOptions, formatOptions) = extractOptionsAndFormatsFromStructure(extracted)
+                    vizOptions = extracted["options"] as? [String: String] ?? [:]
+                    formatsArray = extracted["formats"] as? [[String: Any]] ?? []
                 } else if let singleElement = panelElement.element(named: "single") {
                     vizType = .single
                     if let searchElement = singleElement.element(named: "search") {
                         search = parseSearch(from: searchElement)
                     }
                     let extracted = singleElement.extractAllOptions()
-                    (vizOptions, formatOptions) = extractOptionsAndFormatsFromStructure(extracted)
+                    vizOptions = extracted["options"] as? [String: String] ?? [:]
+                    formatsArray = extracted["formats"] as? [[String: Any]] ?? []
                 }
+
+                // Convert format dictionaries to AnyCodable format
+                let formatsAnyCodable: [[String: AnyCodable]] = formatsArray.map { formatDict in
+                    var result: [String: AnyCodable] = [:]
+                    for (key, value) in formatDict {
+                        result[key] = AnyCodable(value)
+                    }
+                    return result
+                }
+                print("🔍 DashboardLoader: converted to \(formatsAnyCodable.count) AnyCodable format(s)")
 
                 let visualization = SimpleXMLVisualization(
                     type: vizType,
                     options: vizOptions,
-                    formatElements: formatOptions
+                    formats: formatsAnyCodable
                 )
+                print("🔍 DashboardLoader: created visualization with \(visualization.formats.count) format(s)")
                 let panel = SimpleXMLPanel(
                     title: title,
                     visualization: visualization,

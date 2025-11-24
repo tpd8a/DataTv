@@ -50,16 +50,16 @@ public struct SimpleXMLPanel: Sendable {
 public struct SimpleXMLVisualization: Sendable {
     public let type: SimpleXMLVisualizationType
     public let options: [String: String]           // Flattened options
-    public let formatElements: [String: String]     // Flattened format.field.property keys
+    public let formats: [[String: AnyCodable]]     // Structured format elements array
 
     public init(
         type: SimpleXMLVisualizationType,
         options: [String: String] = [:],
-        formatElements: [String: String] = [:]
+        formats: [[String: AnyCodable]] = []
     ) {
         self.type = type
         self.options = options
-        self.formatElements = formatElements
+        self.formats = formats
     }
 }
 
