@@ -73,6 +73,16 @@ public struct TokenAdapter: Identifiable {
         return choices.first?.value
     }
 
+    /// Get change handler if present
+    public var changeHandler: InputChangeHandler? {
+        return parsedOptions?.changeHandler
+    }
+
+    /// Get the label for a given value (from choices)
+    public func getLabel(forValue value: String) -> String? {
+        return choices.first(where: { $0.value == value })?.label
+    }
+
     // MARK: - Initialization
 
     public init(input: DashboardInput) {

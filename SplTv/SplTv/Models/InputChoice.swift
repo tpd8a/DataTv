@@ -1,4 +1,5 @@
 import Foundation
+import DashboardKit
 
 /// Represents a choice option for dashboard inputs (dropdown, radio, etc.)
 /// Parsed from DashboardInput.optionsJSON
@@ -22,6 +23,7 @@ public struct InputOptions: Codable {
     public let choices: [ChoiceData]?
     public let defaultValue: String?
     public let token: String?
+    public let changeHandler: InputChangeHandler?
 
     public struct ChoiceData: Codable {
         public let label: String
