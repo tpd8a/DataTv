@@ -66,11 +66,33 @@ public struct TokenAdapter: Identifiable {
     /// Get initial value (priority: defaultValue > first choice)
     public var initialValue: String? {
         if let defaultVal = defaultValue, !defaultVal.isEmpty {
+            // Check if default matches a choice value directly
+            if choices.contains(where: { $0.value == defaultVal }) {
+                return defaultVal
+            }
+
+            // If not, check if it matches a label and return that choice's value
+            if let matchingChoice = choices.first(where: { $0.label == defaultVal }) {
+                print("⚠️ Default '\(defaultVal)' is a label, using value '\(matchingChoice.value)' instead")
+                return matchingChoice.value
+            }
+
+            // Otherwise use the default as-is (for text inputs, etc.)
             return defaultVal
         }
 
         // Return first choice value if available
         return choices.first?.value
+    }
+
+    /// Get change handler if present
+    public var changeHandler: InputChangeHandler? {
+        return parsedOptions?.changeHandler
+    }
+
+    /// Get the label for a given value (from choices)
+    public func getLabel(forValue value: String) -> String? {
+        return choices.first(where: { $0.value == value })?.label
     }
 
     // MARK: - Initialization

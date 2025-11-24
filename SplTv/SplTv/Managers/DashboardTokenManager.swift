@@ -64,6 +64,13 @@ public class DashboardTokenManager: ObservableObject {
 
             tokenValues[adapter.name] = tokenValue
             print("  ✅ Token '\(adapter.name)': \(initialValue)")
+
+            // Execute change handler if present (with initial value)
+            if let handler = adapter.changeHandler, !initialValue.isEmpty {
+                let label = adapter.getLabel(forValue: initialValue) ?? initialValue
+                executeChangeHandler(handler, selectedValue: initialValue, selectedLabel: label)
+                print("  🔄 Executed change handler for '\(adapter.name)'")
+            }
         }
 
         print("🎛️ Loaded \(tokenValues.count) token(s)")
@@ -115,6 +122,104 @@ public class DashboardTokenManager: ObservableObject {
         tokenAdapters.removeAll()
         activeDashboardId = nil
         print("🎛️ All tokens cleared")
+    }
+
+    // MARK: - Change Handler Execution
+
+    /// Execute a change handler and apply resulting token updates
+    /// - Parameters:
+    ///   - handler: The change handler to execute
+    ///   - selectedValue: The value of the selected choice
+    ///   - selectedLabel: The label of the selected choice
+    public func executeChangeHandler(
+        _ handler: InputChangeHandler,
+        selectedValue: String,
+        selectedLabel: String
+    ) {
+        // Helper function to perform variable substitution
+        func substitute(_ input: String?) -> String? {
+            guard var result = input else { return nil }
+
+            // Replace $label$
+            result = result.replacingOccurrences(of: "$label$", with: selectedLabel)
+
+            // Replace $value$
+            result = result.replacingOccurrences(of: "$value$", with: selectedValue)
+
+            // Replace $form.xxx$ with current token values
+            for (tokenName, tokenValue) in tokenValues {
+                let formToken = "$form.\(tokenName)$"
+                result = result.replacingOccurrences(of: formToken, with: tokenValue.value)
+            }
+
+            return result
+        }
+
+        var tokenUpdates: [String: String?] = [:]
+
+        // Execute unconditional actions first
+        for action in handler.unconditionalActions {
+            switch action.type {
+            case .set:
+                tokenUpdates[action.token] = substitute(action.value)
+            case .unset:
+                tokenUpdates[action.token] = nil
+            case .eval:
+                tokenUpdates[action.token] = substitute(action.value)
+            case .link:
+                // Link actions don't set tokens
+                break
+            }
+        }
+
+        // Check conditions and execute matching actions
+        for condition in handler.conditions {
+            var matches = false
+
+            switch condition.matchType {
+            case .label:
+                matches = (selectedLabel == condition.matchValue)
+            case .value:
+                matches = (selectedValue == condition.matchValue)
+            case .match:
+                // Regex match on value
+                if let regex = try? NSRegularExpression(pattern: condition.matchValue) {
+                    let nsValue = selectedValue as NSString
+                    matches = regex.firstMatch(
+                        in: selectedValue,
+                        range: NSRange(location: 0, length: nsValue.length)
+                    ) != nil
+                }
+            }
+
+            // If condition matches, execute its actions (first match wins)
+            if matches {
+                for action in condition.actions {
+                    switch action.type {
+                    case .set:
+                        tokenUpdates[action.token] = substitute(action.value)
+                    case .unset:
+                        tokenUpdates[action.token] = nil
+                    case .eval:
+                        tokenUpdates[action.token] = substitute(action.value)
+                    case .link:
+                        break
+                    }
+                }
+                break // Stop after first matching condition
+            }
+        }
+
+        // Apply the token updates
+        for (tokenName, value) in tokenUpdates {
+            if let value = value {
+                setTokenValue(value, forToken: tokenName, source: .calculated)
+            } else {
+                // Unset token
+                tokenValues.removeValue(forKey: tokenName)
+                print("🎛️ Token '\(tokenName)' unset")
+            }
+        }
     }
 
     // MARK: - Token Statistics

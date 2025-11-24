@@ -259,6 +259,13 @@ struct TokenInputView: View {
         textValue = value
         tokenManager.setTokenValue(value, forToken: adapter.name, source: .user)
         print("🎛️ Token '\(adapter.name)' set to: '\(value)'")
+
+        // Execute change handler if present
+        if let handler = adapter.changeHandler {
+            let label = adapter.getLabel(forValue: value) ?? value
+            tokenManager.executeChangeHandler(handler, selectedValue: value, selectedLabel: label)
+            print("🎛️ Executed change handler for '\(adapter.name)'")
+        }
     }
 
     private func setTimeRange(_ earliest: String, _ latest: String) {

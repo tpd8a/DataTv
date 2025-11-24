@@ -349,6 +349,59 @@ public actor CoreDataManager {
 
                         position += 1
                     }
+
+                    // Process panel-level inputs (if any)
+                    for simpleInput in panel.inputs {
+                        let input = DashboardInput(context: context)
+                        input.id = UUID()
+                        input.inputId = "input_\(UUID().uuidString)"
+                        input.type = "input.\(simpleInput.type.rawValue)"
+                        input.title = simpleInput.label
+                        input.token = simpleInput.token
+                        input.defaultValue = simpleInput.defaultValue
+                        input.dashboard = dashboard
+
+                        print("💾 Saving panel input: \(simpleInput.token)")
+
+                        // Store choices and change handler in optionsJSON
+                        var inputOptions: [String: Any] = [:]
+
+                        if !simpleInput.choices.isEmpty {
+                            let choicesData = simpleInput.choices.map { choice -> [String: Any] in
+                                return [
+                                    "value": choice.value,
+                                    "label": choice.label
+                                ]
+                            }
+                            inputOptions["choices"] = choicesData
+                        }
+
+                        // Add change handler if present
+                        if let changeHandler = simpleInput.changeHandler {
+                            if let handlerData = try? JSONEncoder().encode(changeHandler),
+                               let handlerDict = try? JSONSerialization.jsonObject(with: handlerData) as? [String: Any] {
+                                inputOptions["changeHandler"] = handlerDict
+                                print("💾 Storing change handler for input: \(simpleInput.token)")
+                            }
+                        }
+
+                        if !inputOptions.isEmpty,
+                           let optionsData = try? JSONSerialization.data(withJSONObject: inputOptions),
+                           let optionsString = String(data: optionsData, encoding: .utf8) {
+                            input.optionsJSON = optionsString
+                        }
+
+                        // Create layout item for input
+                        let inputLayoutItem = LayoutItem(context: context)
+                        inputLayoutItem.id = UUID()
+                        inputLayoutItem.type = "input"
+                        inputLayoutItem.bootstrapWidth = "12"
+                        inputLayoutItem.position = Int32(position)
+                        inputLayoutItem.layout = layout
+                        inputLayoutItem.input = input
+
+                        position += 1
+                    }
                 }
             }
 
@@ -365,7 +418,9 @@ public actor CoreDataManager {
                         input.defaultValue = simpleInput.defaultValue
                         input.dashboard = dashboard
 
-                        // Store choices in optionsJSON
+                        // Store choices and change handler in optionsJSON
+                        var inputOptions: [String: Any] = [:]
+
                         if !simpleInput.choices.isEmpty {
                             let choicesData = simpleInput.choices.map { choice -> [String: Any] in
                                 return [
@@ -373,12 +428,22 @@ public actor CoreDataManager {
                                     "label": choice.label
                                 ]
                             }
-                            let inputOptions: [String: Any] = ["choices": choicesData]
+                            inputOptions["choices"] = choicesData
+                        }
 
-                            if let optionsData = try? JSONSerialization.data(withJSONObject: inputOptions),
-                               let optionsString = String(data: optionsData, encoding: .utf8) {
-                                input.optionsJSON = optionsString
+                        // Add change handler if present
+                        if let changeHandler = simpleInput.changeHandler {
+                            if let handlerData = try? JSONEncoder().encode(changeHandler),
+                               let handlerDict = try? JSONSerialization.jsonObject(with: handlerData) as? [String: Any] {
+                                inputOptions["changeHandler"] = handlerDict
+                                print("💾 Storing change handler for fieldset input: \(simpleInput.token)")
                             }
+                        }
+
+                        if !inputOptions.isEmpty,
+                           let optionsData = try? JSONSerialization.data(withJSONObject: inputOptions),
+                           let optionsString = String(data: optionsData, encoding: .utf8) {
+                            input.optionsJSON = optionsString
                         }
 
                         // Create layout item for input
@@ -1015,8 +1080,30 @@ public actor CoreDataManager {
 
         // Build search parameters
         // Use timeRange parameter if provided, otherwise use extracted values from DataSource
-        let finalEarliest = timeRange?.earliest ?? extractedEarliest
-        let finalLatest = timeRange?.latest ?? extractedLatest
+        var finalEarliest = timeRange?.earliest ?? extractedEarliest
+        var finalLatest = timeRange?.latest ?? extractedLatest
+
+        // Apply token substitutions to time range values
+        if let earliest = finalEarliest {
+            var substituted = earliest
+            for (token, value) in userTokenValues {
+                substituted = substituted.replacingOccurrences(of: "$\(token)$", with: value)
+            }
+            finalEarliest = substituted
+            if substituted != earliest {
+                print("🎛️ Substituted earliest: '\(earliest)' → '\(substituted)'")
+            }
+        }
+        if let latest = finalLatest {
+            var substituted = latest
+            for (token, value) in userTokenValues {
+                substituted = substituted.replacingOccurrences(of: "$\(token)$", with: value)
+            }
+            finalLatest = substituted
+            if substituted != latest {
+                print("🎛️ Substituted latest: '\(latest)' → '\(substituted)'")
+            }
+        }
 
         let parameters = SearchParameters(
             earliestTime: finalEarliest,

@@ -80,6 +80,54 @@ public struct DashboardConverter {
                 let vizId = "viz_\(vizCounter)"
                 vizCounter += 1
 
+                // Convert panel-level inputs (if any)
+                for input in panel.inputs {
+                    let inputId = "input_\(input.token)"
+
+                    // Convert choices to Studio input options
+                    var inputOptions: [String: AnyCodable]? = nil
+                    if !input.choices.isEmpty {
+                        var items: [[String: String]] = []
+                        for choice in input.choices {
+                            items.append([
+                                "label": choice.label,
+                                "value": choice.value
+                            ])
+                        }
+                        inputOptions = [
+                            "items": AnyCodable(items),
+                            "token": AnyCodable(input.token)
+                        ]
+                        if let defaultValue = input.defaultValue {
+                            inputOptions?["defaultValue"] = AnyCodable(defaultValue)
+                        }
+                    }
+
+                    let studioInput = InputDefinition(
+                        type: convertInputType(input.type),
+                        title: input.label,
+                        token: input.token,
+                        defaultValue: input.defaultValue,
+                        options: inputOptions
+                    )
+
+                    inputs[inputId] = studioInput
+
+                    // Add to layout (place before the visualization)
+                    let layoutItem = LayoutStructureItem(
+                        item: inputId,
+                        type: .input,
+                        position: PositionDefinition(
+                            x: xPosition,
+                            y: yPosition,
+                            w: panelWidth,
+                            h: 50
+                        )
+                    )
+                    layoutStructure.append(layoutItem)
+                    yPosition += 60
+                }
+
                 // Create data source if search exists
                 var primaryDataSource: String?
                 if let search = panel.search {
