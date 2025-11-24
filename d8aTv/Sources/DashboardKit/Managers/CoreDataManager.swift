@@ -349,6 +349,47 @@ public actor CoreDataManager {
 
                         position += 1
                     }
+
+                    // Process panel-level inputs (if any)
+                    for simpleInput in panel.inputs {
+                        let input = DashboardInput(context: context)
+                        input.id = UUID()
+                        input.inputId = "input_\(UUID().uuidString)"
+                        input.type = "input.\(simpleInput.type.rawValue)"
+                        input.title = simpleInput.label
+                        input.token = simpleInput.token
+                        input.defaultValue = simpleInput.defaultValue
+                        input.dashboard = dashboard
+
+                        print("💾 Saving panel input: \(simpleInput.token)")
+
+                        // Store choices in optionsJSON
+                        if !simpleInput.choices.isEmpty {
+                            let choicesData = simpleInput.choices.map { choice -> [String: Any] in
+                                return [
+                                    "value": choice.value,
+                                    "label": choice.label
+                                ]
+                            }
+                            let inputOptions: [String: Any] = ["choices": choicesData]
+
+                            if let optionsData = try? JSONSerialization.data(withJSONObject: inputOptions),
+                               let optionsString = String(data: optionsData, encoding: .utf8) {
+                                input.optionsJSON = optionsString
+                            }
+                        }
+
+                        // Create layout item for input
+                        let inputLayoutItem = LayoutItem(context: context)
+                        inputLayoutItem.id = UUID()
+                        inputLayoutItem.type = "input"
+                        inputLayoutItem.bootstrapWidth = "12"
+                        inputLayoutItem.position = Int32(position)
+                        inputLayoutItem.layout = layout
+                        inputLayoutItem.input = input
+
+                        position += 1
+                    }
                 }
             }
 
