@@ -9,6 +9,7 @@ public struct SearchExecutionSummary: Sendable, Identifiable {
     public let id: UUID
     public let searchId: String
     public let executionId: String
+    public let dataSourceId: String  // DataSource sourceId (e.g., "base_new")
     public let query: String
     public let status: SearchStatus
     public let startTime: Date
@@ -25,12 +26,13 @@ public struct SearchExecutionSummary: Sendable, Identifiable {
         return endTime.timeIntervalSince(startTime)
     }
 
-    public init(id: UUID, searchId: String, executionId: String, query: String,
+    public init(id: UUID, searchId: String, executionId: String, dataSourceId: String, query: String,
                 status: SearchStatus, startTime: Date, endTime: Date? = nil,
                 resultCount: Int64 = 0, errorMessage: String? = nil) {
         self.id = id
         self.searchId = searchId
         self.executionId = executionId
+        self.dataSourceId = dataSourceId
         self.query = query
         self.status = status
         self.startTime = startTime
@@ -107,9 +109,140 @@ public class SearchExecutionMonitor: ObservableObject {
     }
 
     private func fetchActiveExecutions() async throws -> [SearchExecutionSummary] {
-        // This would need to be implemented in CoreDataManager
-        // For now, return empty array as placeholder
-        return []
+        // Get active executions from CoreDataManager
+        let executions = try await coreDataManager.fetchActiveSearchExecutions()
+
+        // Check status for each running execution and update if needed
+        for execution in executions where execution.status == .running {
+            await checkAndUpdateExecutionStatus(execution)
+        }
+
+        return executions
+    }
+
+    /// Check and update the status of a running execution
+    private func checkAndUpdateExecutionStatus(_ execution: SearchExecutionSummary) async {
+        do {
+            // Get the data source config to find the registered data source
+            guard let dataSource = await getDataSourceForExecution(execution) else {
+                print("⚠️ No data source found for execution \(execution.executionId)")
+                return
+            }
+
+            // Check status from Splunk
+            let status = try await dataSource.checkSearchStatus(executionId: execution.executionId)
+
+            // If status changed, update in CoreData
+            if status != execution.status {
+                print("📊 Status update for \(execution.executionId): \(execution.status) → \(status)")
+
+                if status == .completed {
+                    // Fetch results
+                    let results = try await dataSource.fetchResults(
+                        executionId: execution.executionId,
+                        offset: 0,
+                        limit: 10000
+                    )
+
+                    // Update execution with results
+                    try await coreDataManager.updateSearchExecution(
+                        executionId: execution.id,
+                        status: status,
+                        results: results
+                    )
+
+                    print("✅ Execution \(execution.executionId) completed with \(results.count) results")
+
+                    // If this is an input search, process results to populate choices
+                    if execution.dataSourceId.hasPrefix("input_search_") {
+                        print("🎯 Processing input search results for \(execution.dataSourceId)")
+                        if let dashboardId = try? await coreDataManager.getDashboardId(forExecutionId: execution.id) {
+                            try? await coreDataManager.processInputSearchResults(dashboardId: dashboardId)
+                        }
+                    }
+
+                    print("🔗 Checking for chained searches for base dataSourceId: \(execution.dataSourceId)")
+
+                    // Trigger any chained searches that depend on this base search
+                    await triggerChainedSearches(for: execution)
+                } else {
+                    // Just update status
+                    try await coreDataManager.updateSearchExecution(
+                        executionId: execution.id,
+                        status: status
+                    )
+                }
+            }
+        } catch {
+            print("❌ Error checking execution status: \(error)")
+            // Mark as failed
+            try? await coreDataManager.updateSearchExecution(
+                executionId: execution.id,
+                status: .failed,
+                errorMessage: error.localizedDescription
+            )
+        }
+    }
+
+    /// Get the data source for an execution
+    private func getDataSourceForExecution(_ execution: SearchExecutionSummary) async -> (any DataSourceProtocol)? {
+        // Get the execution's data source config ID from CoreData
+        guard let configId = try? await coreDataManager.getDataSourceConfigId(forExecutionId: execution.id) else {
+            return nil
+        }
+
+        // Get the registered data source
+        return await coreDataManager.getDataSource(withId: configId.uuidString)
+    }
+
+    /// Trigger chained searches that depend on a completed base search
+    private func triggerChainedSearches(for baseExecution: SearchExecutionSummary) async {
+        print("🔗 triggerChainedSearches called for dataSourceId: \(baseExecution.dataSourceId) (executionId: \(baseExecution.executionId))")
+        do {
+            // Get the dashboard ID for this execution
+            guard let dashboardId = try await coreDataManager.getDashboardId(forExecutionId: baseExecution.id) else {
+                print("⚠️ Could not find dashboard for execution \(baseExecution.id)")
+                return
+            }
+
+            print("🔗 Dashboard ID: \(dashboardId)")
+
+            // Find chained searches that depend on this base search
+            // Use dataSourceId (e.g., "base_new") not searchId (Splunk SID)
+            let chainedSearchIds = try await coreDataManager.getChainedSearches(
+                forBaseSearchId: baseExecution.dataSourceId,
+                in: dashboardId
+            )
+
+            print("🔗 Found \(chainedSearchIds.count) chained search(es) for base search \(baseExecution.dataSourceId)")
+
+            guard !chainedSearchIds.isEmpty else {
+                print("🔗 No chained searches found")
+                return // No chained searches
+            }
+
+            print("🔗 Triggering \(chainedSearchIds.count) chained search(es) for base search \(baseExecution.searchId)")
+
+            // Start execution of each chained search
+            for chainedSearchId in chainedSearchIds {
+                do {
+                    let executionId = try await coreDataManager.startSearchExecution(
+                        searchId: chainedSearchId,
+                        in: dashboardId,
+                        userTokenValues: [:],  // Chained searches inherit from base
+                        timeRange: nil,         // Chained searches use base search's time range
+                        parameterOverrides: [:],
+                        credentials: nil,
+                        baseExecutionId: baseExecution.executionId  // Pass base search's Splunk SID for loadjob
+                    )
+                    print("🔗 Started chained search \(chainedSearchId) with execution ID: \(executionId) (loading base results from \(baseExecution.executionId))")
+                } catch {
+                    print("❌ Error starting chained search \(chainedSearchId): \(error)")
+                }
+            }
+        } catch {
+            print("❌ Error triggering chained searches: \(error)")
+        }
     }
 
     // MARK: - Public Helpers
@@ -169,7 +302,9 @@ extension CoreDataManager {
                       let query = object.value(forKey: "query") as? String,
                       let statusString = object.value(forKey: "status") as? String,
                       let status = SearchStatus(rawValue: statusString),
-                      let startTime = object.value(forKey: "startTime") as? Date else {
+                      let startTime = object.value(forKey: "startTime") as? Date,
+                      let dataSource = object.value(forKey: "dataSource") as? NSManagedObject,
+                      let dataSourceId = dataSource.value(forKey: "sourceId") as? String else {
                     return nil
                 }
 
@@ -181,6 +316,7 @@ extension CoreDataManager {
                     id: id,
                     searchId: searchId,
                     executionId: executionId,
+                    dataSourceId: dataSourceId,
                     query: query,
                     status: status,
                     startTime: startTime,
@@ -209,7 +345,9 @@ extension CoreDataManager {
                       let query = object.value(forKey: "query") as? String,
                       let statusString = object.value(forKey: "status") as? String,
                       let status = SearchStatus(rawValue: statusString),
-                      let startTime = object.value(forKey: "startTime") as? Date else {
+                      let startTime = object.value(forKey: "startTime") as? Date,
+                      let dataSource = object.value(forKey: "dataSource") as? NSManagedObject,
+                      let dataSourceId = dataSource.value(forKey: "sourceId") as? String else {
                     return nil
                 }
 
@@ -221,6 +359,7 @@ extension CoreDataManager {
                     id: id,
                     searchId: searchId,
                     executionId: executionId,
+                    dataSourceId: dataSourceId,
                     query: query,
                     status: status,
                     startTime: startTime,

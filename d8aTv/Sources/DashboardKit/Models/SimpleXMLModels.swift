@@ -127,26 +127,38 @@ public struct SimpleXMLInput: Sendable {
     public let token: String
     public let label: String?
     public let defaultValue: String?
+    public let initialValue: String?
     public let searchWhenChanged: Bool
-    public let choices: [SimpleXMLInputChoice]  // Dropdown/radio choices
+    public let choices: [SimpleXMLInputChoice]  // Static dropdown/radio choices
     public let changeHandler: InputChangeHandler?  // Change event actions
+    public let search: SimpleXMLSearch?  // Search to populate choices dynamically
+    public let fieldForLabel: String?  // Field from search results to use as choice label
+    public let fieldForValue: String?  // Field from search results to use as choice value
 
     public init(
         type: SimpleXMLInputType,
         token: String,
         label: String? = nil,
         defaultValue: String? = nil,
+        initialValue: String? = nil,
         searchWhenChanged: Bool = true,
         choices: [SimpleXMLInputChoice] = [],
-        changeHandler: InputChangeHandler? = nil
+        changeHandler: InputChangeHandler? = nil,
+        search: SimpleXMLSearch? = nil,
+        fieldForLabel: String? = nil,
+        fieldForValue: String? = nil
     ) {
         self.type = type
         self.token = token
         self.label = label
         self.defaultValue = defaultValue
+        self.initialValue = initialValue
         self.searchWhenChanged = searchWhenChanged
         self.choices = choices
         self.changeHandler = changeHandler
+        self.search = search
+        self.fieldForLabel = fieldForLabel
+        self.fieldForValue = fieldForValue
     }
 }
 

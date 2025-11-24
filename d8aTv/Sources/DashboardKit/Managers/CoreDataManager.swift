@@ -381,8 +381,44 @@ public actor CoreDataManager {
                             if let handlerData = try? JSONEncoder().encode(changeHandler),
                                let handlerDict = try? JSONSerialization.jsonObject(with: handlerData) as? [String: Any] {
                                 inputOptions["changeHandler"] = handlerDict
-                                print("💾 Storing change handler for input: \(simpleInput.token)")
+                                print("💾 Storing change handler for panel input: \(simpleInput.token)")
                             }
+                        }
+
+                        // Create DataSource for input search if present
+                        if let inputSearch = simpleInput.search {
+                            let searchSourceId = "input_search_\(simpleInput.token)"
+                            let dataSource = DataSource(context: context)
+                            dataSource.id = UUID()
+                            dataSource.sourceId = searchSourceId
+                            dataSource.type = "ds.search"
+                            dataSource.query = inputSearch.query
+                            dataSource.refresh = inputSearch.refresh
+                            dataSource.refreshType = inputSearch.refreshType
+                            dataSource.dashboard = dashboard
+
+                            // Store earliest/latest in optionsJSON
+                            var searchOptions: [String: Any] = [:]
+                            if let earliest = inputSearch.earliest {
+                                searchOptions["earliest"] = earliest
+                            }
+                            if let latest = inputSearch.latest {
+                                searchOptions["latest"] = latest
+                            }
+                            if !searchOptions.isEmpty,
+                               let optionsData = try? JSONSerialization.data(withJSONObject: searchOptions),
+                               let optionsString = String(data: optionsData, encoding: .utf8) {
+                                dataSource.optionsJSON = optionsString
+                            }
+
+                            // Add search metadata to input options
+                            inputOptions["choiceSearch"] = [
+                                "sourceId": searchSourceId,
+                                "fieldForLabel": simpleInput.fieldForLabel ?? simpleInput.fieldForValue ?? "value",
+                                "fieldForValue": simpleInput.fieldForValue ?? "value"
+                            ]
+
+                            print("💾 Created DataSource for panel input search: \(searchSourceId)")
                         }
 
                         if !inputOptions.isEmpty,
@@ -438,6 +474,42 @@ public actor CoreDataManager {
                                 inputOptions["changeHandler"] = handlerDict
                                 print("💾 Storing change handler for fieldset input: \(simpleInput.token)")
                             }
+                        }
+
+                        // Create DataSource for input search if present
+                        if let inputSearch = simpleInput.search {
+                            let searchSourceId = "input_search_\(simpleInput.token)"
+                            let dataSource = DataSource(context: context)
+                            dataSource.id = UUID()
+                            dataSource.sourceId = searchSourceId
+                            dataSource.type = "ds.search"
+                            dataSource.query = inputSearch.query
+                            dataSource.refresh = inputSearch.refresh
+                            dataSource.refreshType = inputSearch.refreshType
+                            dataSource.dashboard = dashboard
+
+                            // Store earliest/latest in optionsJSON
+                            var searchOptions: [String: Any] = [:]
+                            if let earliest = inputSearch.earliest {
+                                searchOptions["earliest"] = earliest
+                            }
+                            if let latest = inputSearch.latest {
+                                searchOptions["latest"] = latest
+                            }
+                            if !searchOptions.isEmpty,
+                               let optionsData = try? JSONSerialization.data(withJSONObject: searchOptions),
+                               let optionsString = String(data: optionsData, encoding: .utf8) {
+                                dataSource.optionsJSON = optionsString
+                            }
+
+                            // Add search metadata to input options
+                            inputOptions["choiceSearch"] = [
+                                "sourceId": searchSourceId,
+                                "fieldForLabel": simpleInput.fieldForLabel ?? simpleInput.fieldForValue ?? "value",
+                                "fieldForValue": simpleInput.fieldForValue ?? "value"
+                            ]
+
+                            print("💾 Created DataSource for input search: \(searchSourceId)")
                         }
 
                         if !inputOptions.isEmpty,
@@ -1157,6 +1229,131 @@ public actor CoreDataManager {
             return TimeInterval(number * 3600)
         default:
             return nil
+        }
+    }
+
+    // MARK: - Input Search Results Processing
+
+    /// Process completed input search results and populate dynamic choices
+    /// This should be called after input searches complete to extract field values
+    public func processInputSearchResults(dashboardId: UUID) async throws {
+        let context = persistentContainer.newBackgroundContext()
+        context.mergePolicy = NSMergePolicy.mergeByPropertyObjectTrump
+
+        try await context.perform {
+            // Find the dashboard
+            let dashboardFetch: NSFetchRequest<Dashboard> = Dashboard.fetchRequest()
+            dashboardFetch.predicate = NSPredicate(format: "id == %@", dashboardId as CVarArg)
+            guard let dashboard = try? context.fetch(dashboardFetch).first else {
+                print("⚠️ Dashboard not found for input search processing")
+                return
+            }
+
+            // Get all inputs for this dashboard
+            guard let allInputs = dashboard.inputs?.allObjects as? [DashboardInput] else {
+                return
+            }
+
+            // Process each input that has choiceSearch configuration
+            for input in allInputs {
+                try self.processInputSearchResult(input: input, dashboard: dashboard, context: context)
+            }
+
+            // Save changes
+            if context.hasChanges {
+                try context.save()
+                print("✅ Processed input search results for dashboard '\(dashboard.title ?? "unknown")'")
+            }
+        }
+    }
+
+    /// Process a single input's search results
+    private nonisolated func processInputSearchResult(input: DashboardInput, dashboard: Dashboard, context: NSManagedObjectContext) throws {
+        // Parse optionsJSON to check for choiceSearch
+        guard let optionsJSON = input.optionsJSON,
+              let data = optionsJSON.data(using: .utf8),
+              let options = try? JSONDecoder().decode([String: AnyCodable].self, from: data),
+              let choiceSearchData = options["choiceSearch"],
+              let choiceSearchDict = choiceSearchData.value as? [String: Any],
+              let sourceId = choiceSearchDict["sourceId"] as? String else {
+            return  // No choiceSearch configuration
+        }
+
+        let fieldForLabel = choiceSearchDict["fieldForLabel"] as? String ?? "value"
+        let fieldForValue = choiceSearchDict["fieldForValue"] as? String ?? "value"
+
+        // Find the DataSource for this input search
+        guard let dataSources = dashboard.dataSources?.allObjects as? [DataSource],
+              let dataSource = dataSources.first(where: { $0.sourceId == sourceId }) else {
+            print("⚠️ DataSource '\(sourceId)' not found for input '\(input.token ?? "unknown")'")
+            return
+        }
+
+        // Find the most recent completed search execution for this DataSource
+        guard let executions = dataSource.executions?.allObjects as? [SearchExecution] else {
+            print("⚠️ No search executions found for input '\(input.token ?? "unknown")'")
+            return
+        }
+
+        let completedExecutions = executions.filter { $0.status == "completed" }
+        let sortedExecutions = completedExecutions.sorted { ($0.endTime ?? Date.distantPast) > ($1.endTime ?? Date.distantPast) }
+
+        guard let latestExecution = sortedExecutions.first,
+              let results = latestExecution.results?.allObjects as? [SearchResult] else {
+            print("⚠️ No completed search results found for input '\(input.token ?? "unknown")'")
+            return
+        }
+
+        print("🔄 Processing \(results.count) search results for input '\(input.token ?? "unknown")'")
+
+        // Extract choices from search results
+        var dynamicChoices: [[String: Any]] = []
+        for result in results.sorted(by: { $0.rowIndex < $1.rowIndex }) {
+            guard let resultJSON = result.resultJSON,
+                  let resultData = resultJSON.data(using: String.Encoding.utf8),
+                  let resultDict = try? JSONSerialization.jsonObject(with: resultData) as? [String: Any] else {
+                continue
+            }
+
+            // Extract the specified fields
+            let labelValue = resultDict[fieldForLabel] as? String ?? ""
+            let choiceValue = resultDict[fieldForValue] as? String ?? labelValue
+
+            if !choiceValue.isEmpty {
+                dynamicChoices.append([
+                    "label": labelValue,
+                    "value": choiceValue
+                ])
+            }
+        }
+
+        // Merge with existing static choices
+        var updatedOptions = options
+        var allChoices: [[String: Any]] = []
+
+        // Add static choices first
+        if let existingChoices = options["choices"]?.value as? [[String: Any]] {
+            allChoices.append(contentsOf: existingChoices)
+        }
+
+        // Add dynamic choices (avoiding duplicates by value)
+        let existingValues = Set(allChoices.compactMap { $0["value"] as? String })
+        for choice in dynamicChoices {
+            if let value = choice["value"] as? String, !existingValues.contains(value) {
+                allChoices.append(choice)
+            }
+        }
+
+        // Update options with merged choices
+        updatedOptions["choices"] = AnyCodable(allChoices)
+
+        // Serialize back to JSON
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        if let updatedData = try? encoder.encode(updatedOptions),
+           let updatedJSON = String(data: updatedData, encoding: .utf8) {
+            input.optionsJSON = updatedJSON
+            print("✅ Updated input '\(input.token ?? "unknown")' with \(dynamicChoices.count) dynamic choices (total: \(allChoices.count))")
         }
     }
 }
