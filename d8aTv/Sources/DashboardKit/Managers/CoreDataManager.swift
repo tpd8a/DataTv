@@ -363,7 +363,9 @@ public actor CoreDataManager {
 
                         print("💾 Saving panel input: \(simpleInput.token)")
 
-                        // Store choices in optionsJSON
+                        // Store choices and change handler in optionsJSON
+                        var inputOptions: [String: Any] = [:]
+
                         if !simpleInput.choices.isEmpty {
                             let choicesData = simpleInput.choices.map { choice -> [String: Any] in
                                 return [
@@ -371,12 +373,22 @@ public actor CoreDataManager {
                                     "label": choice.label
                                 ]
                             }
-                            let inputOptions: [String: Any] = ["choices": choicesData]
+                            inputOptions["choices"] = choicesData
+                        }
 
-                            if let optionsData = try? JSONSerialization.data(withJSONObject: inputOptions),
-                               let optionsString = String(data: optionsData, encoding: .utf8) {
-                                input.optionsJSON = optionsString
+                        // Add change handler if present
+                        if let changeHandler = simpleInput.changeHandler {
+                            if let handlerData = try? JSONEncoder().encode(changeHandler),
+                               let handlerDict = try? JSONSerialization.jsonObject(with: handlerData) as? [String: Any] {
+                                inputOptions["changeHandler"] = handlerDict
+                                print("💾 Storing change handler for input: \(simpleInput.token)")
                             }
+                        }
+
+                        if !inputOptions.isEmpty,
+                           let optionsData = try? JSONSerialization.data(withJSONObject: inputOptions),
+                           let optionsString = String(data: optionsData, encoding: .utf8) {
+                            input.optionsJSON = optionsString
                         }
 
                         // Create layout item for input
@@ -406,7 +418,9 @@ public actor CoreDataManager {
                         input.defaultValue = simpleInput.defaultValue
                         input.dashboard = dashboard
 
-                        // Store choices in optionsJSON
+                        // Store choices and change handler in optionsJSON
+                        var inputOptions: [String: Any] = [:]
+
                         if !simpleInput.choices.isEmpty {
                             let choicesData = simpleInput.choices.map { choice -> [String: Any] in
                                 return [
@@ -414,12 +428,22 @@ public actor CoreDataManager {
                                     "label": choice.label
                                 ]
                             }
-                            let inputOptions: [String: Any] = ["choices": choicesData]
+                            inputOptions["choices"] = choicesData
+                        }
 
-                            if let optionsData = try? JSONSerialization.data(withJSONObject: inputOptions),
-                               let optionsString = String(data: optionsData, encoding: .utf8) {
-                                input.optionsJSON = optionsString
+                        // Add change handler if present
+                        if let changeHandler = simpleInput.changeHandler {
+                            if let handlerData = try? JSONEncoder().encode(changeHandler),
+                               let handlerDict = try? JSONSerialization.jsonObject(with: handlerData) as? [String: Any] {
+                                inputOptions["changeHandler"] = handlerDict
+                                print("💾 Storing change handler for fieldset input: \(simpleInput.token)")
                             }
+                        }
+
+                        if !inputOptions.isEmpty,
+                           let optionsData = try? JSONSerialization.data(withJSONObject: inputOptions),
+                           let optionsString = String(data: optionsData, encoding: .utf8) {
+                            input.optionsJSON = optionsString
                         }
 
                         // Create layout item for input

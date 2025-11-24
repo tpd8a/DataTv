@@ -428,23 +428,29 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
 
         case "set", "unset", "eval", "link":
             // Create action from accumulated values
-            guard let actionType = currentActionType, !currentActionToken.isEmpty || actionType == .link else {
+            guard let actionType = currentActionType else {
+                break
+            }
+
+            // Link doesn't use token, others require non-empty token
+            let token = currentActionToken ?? ""
+            guard !token.isEmpty || actionType == .link else {
                 break
             }
 
             let action = ChangeAction(
                 type: actionType,
-                token: currentActionToken,
+                token: token,
                 value: currentCharacters.isEmpty ? nil : currentCharacters
             )
 
             // Add to appropriate list
             if inConditionBlock {
                 currentConditionActions.append(action)
-                print("📝 Added condition action: \(actionType.rawValue) token=\(currentActionToken)")
+                print("📝 Added condition action: \(actionType.rawValue) token=\(token)")
             } else if inChangeBlock {
                 currentChangeActions.append(action)
-                print("📝 Added unconditional action: \(actionType.rawValue) token=\(currentActionToken)")
+                print("📝 Added unconditional action: \(actionType.rawValue) token=\(token)")
             }
 
             currentActionType = nil
