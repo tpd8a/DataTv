@@ -74,6 +74,7 @@ public struct DashboardConverter {
         // Convert rows and panels
         for row in simpleXML.rows {
             let panelWidth = 1200 / max(row.panels.count, 1)
+            let bootstrapWidth = calculateBootstrapWidth(panelCount: row.panels.count)
             var xPosition = 0
 
             for panel in row.panels {
@@ -231,7 +232,8 @@ public struct DashboardConverter {
                         x: xPosition,
                         y: yPosition,
                         w: panelWidth,
-                        h: 300
+                        h: 300,
+                        width: bootstrapWidth
                     )
                 )
                 layoutStructure.append(layoutItem)
@@ -690,5 +692,27 @@ public struct DashboardConverter {
         }
 
         return config
+    }
+
+    /// Calculate bootstrap column width based on number of panels in a row
+    /// Bootstrap uses 12-column grid, so divide 12 by panel count
+    private func calculateBootstrapWidth(panelCount: Int) -> BootstrapWidth {
+        let columns = 12 / max(panelCount, 1)
+
+        switch columns {
+        case 12: return .col12
+        case 11: return .col11
+        case 10: return .col10
+        case 9: return .col9
+        case 8: return .col8
+        case 7: return .col7
+        case 6: return .col6
+        case 5: return .col5
+        case 4: return .col4
+        case 3: return .col3
+        case 2: return .col2
+        case 1: return .col1
+        default: return .col12  // Fallback to full width
+        }
     }
 }

@@ -268,6 +268,10 @@ public actor CoreDataManager {
 
             // Process rows and panels
             for row in config.rows {
+                // Calculate bootstrap width for panels in this row
+                let panelsInRow = row.panels.count
+                let bootstrapWidth = String(12 / max(panelsInRow, 1))
+
                 for panel in row.panels {
                     // Create data source if search exists
                     if let search = panel.search {
@@ -342,7 +346,7 @@ public actor CoreDataManager {
                         let layoutItem = LayoutItem(context: context)
                         layoutItem.id = UUID()
                         layoutItem.type = "block"
-                        layoutItem.bootstrapWidth = "12" // Full width by default
+                        layoutItem.bootstrapWidth = bootstrapWidth // Calculated based on panels in row
                         layoutItem.position = Int32(position)
                         layoutItem.layout = layout
                         layoutItem.visualization = viz
@@ -382,6 +386,27 @@ public actor CoreDataManager {
                                let handlerDict = try? JSONSerialization.jsonObject(with: handlerData) as? [String: Any] {
                                 inputOptions["changeHandler"] = handlerDict
                                 print("💾 Storing change handler for panel input: \(simpleInput.token)")
+                            }
+                        }
+
+                        // Add formatting options if present (prefix/suffix for all types, valuePrefix/valueSuffix/delimiter for multiselect)
+                        if simpleInput.prefix != nil || simpleInput.suffix != nil || simpleInput.valuePrefix != nil ||
+                           simpleInput.valueSuffix != nil || simpleInput.delimiter != nil {
+                            print("💾 Storing formatting options for panel input: \(simpleInput.token)")
+                            if let prefix = simpleInput.prefix {
+                                inputOptions["prefix"] = prefix
+                            }
+                            if let suffix = simpleInput.suffix {
+                                inputOptions["suffix"] = suffix
+                            }
+                            if let valuePrefix = simpleInput.valuePrefix {
+                                inputOptions["valuePrefix"] = valuePrefix
+                            }
+                            if let valueSuffix = simpleInput.valueSuffix {
+                                inputOptions["valueSuffix"] = valueSuffix
+                            }
+                            if let delimiter = simpleInput.delimiter {
+                                inputOptions["delimiter"] = delimiter
                             }
                         }
 
@@ -431,7 +456,7 @@ public actor CoreDataManager {
                         let inputLayoutItem = LayoutItem(context: context)
                         inputLayoutItem.id = UUID()
                         inputLayoutItem.type = "input"
-                        inputLayoutItem.bootstrapWidth = "12"
+                        inputLayoutItem.bootstrapWidth = bootstrapWidth // Same width as panels in this row
                         inputLayoutItem.position = Int32(position)
                         inputLayoutItem.layout = layout
                         inputLayoutItem.input = input
@@ -473,6 +498,27 @@ public actor CoreDataManager {
                                let handlerDict = try? JSONSerialization.jsonObject(with: handlerData) as? [String: Any] {
                                 inputOptions["changeHandler"] = handlerDict
                                 print("💾 Storing change handler for fieldset input: \(simpleInput.token)")
+                            }
+                        }
+
+                        // Add formatting options if present (prefix/suffix for all types, valuePrefix/valueSuffix/delimiter for multiselect)
+                        if simpleInput.prefix != nil || simpleInput.suffix != nil || simpleInput.valuePrefix != nil ||
+                           simpleInput.valueSuffix != nil || simpleInput.delimiter != nil {
+                            print("💾 Storing formatting options for fieldset input: \(simpleInput.token)")
+                            if let prefix = simpleInput.prefix {
+                                inputOptions["prefix"] = prefix
+                            }
+                            if let suffix = simpleInput.suffix {
+                                inputOptions["suffix"] = suffix
+                            }
+                            if let valuePrefix = simpleInput.valuePrefix {
+                                inputOptions["valuePrefix"] = valuePrefix
+                            }
+                            if let valueSuffix = simpleInput.valueSuffix {
+                                inputOptions["valueSuffix"] = valueSuffix
+                            }
+                            if let delimiter = simpleInput.delimiter {
+                                inputOptions["delimiter"] = delimiter
                             }
                         }
 
@@ -1240,6 +1286,8 @@ public actor CoreDataManager {
         let context = persistentContainer.newBackgroundContext()
         context.mergePolicy = NSMergePolicy.mergeByPropertyObjectTrump
 
+        var didSaveChanges = false
+
         try await context.perform {
             // Find the dashboard
             let dashboardFetch: NSFetchRequest<Dashboard> = Dashboard.fetchRequest()
@@ -1263,6 +1311,18 @@ public actor CoreDataManager {
             if context.hasChanges {
                 try context.save()
                 print("✅ Processed input search results for dashboard '\(dashboard.title ?? "unknown")'")
+                didSaveChanges = true
+            }
+        }
+
+        // Post notification on main thread if changes were saved
+        if didSaveChanges {
+            await MainActor.run {
+                NotificationCenter.default.post(
+                    name: .inputSearchResultsProcessed,
+                    object: nil,
+                    userInfo: ["dashboardId": dashboardId.uuidString]
+                )
             }
         }
     }
@@ -1389,4 +1449,11 @@ public enum CoreDataManagerError: Error, CustomStringConvertible {
             return "Configuration not found"
         }
     }
+}
+
+// MARK: - Notification Names
+
+public extension Notification.Name {
+    /// Posted when input search results have been processed and choices updated
+    static let inputSearchResultsProcessed = Notification.Name("inputSearchResultsProcessed")
 }

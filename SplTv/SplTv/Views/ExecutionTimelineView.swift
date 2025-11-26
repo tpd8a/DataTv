@@ -20,6 +20,19 @@ struct ExecutionTimelineView: View {
                 timelineSliderSection
             }
         }
+        .padding(16)
+        .background {
+            // Subtle gradient to provide depth for glass effect
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.05), Color.white.opacity(0.02)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        }
+        .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     // MARK: - Header
@@ -53,43 +66,49 @@ struct ExecutionTimelineView: View {
     // MARK: - Playback Controls
 
     private var playbackControlsSection: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 16) {
+            Spacer()
+
+            // Previous button
             Button {
                 moveToPrevious()
             } label: {
-                Image(systemName: "backward.fill")
+                Image(systemName: "backward.end.fill")
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.glass)
+            .buttonBorderShape(.circle)
             .disabled(currentIndex >= executions.count - 1)
 
+            // Play/Pause button with prominence
             Button {
                 isPlaying.toggle()
             } label: {
                 Image(systemName: isPlaying ? "pause.fill" : "play.fill")
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.glassProminent)
+            .buttonBorderShape(.circle)
+            .tint(.blue)
 
+            // Next button
             Button {
                 moveToNext()
             } label: {
-                Image(systemName: "forward.fill")
+                Image(systemName: "forward.end.fill")
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.glass)
+            .buttonBorderShape(.circle)
             .disabled(currentIndex <= 0)
 
-            Button {
-                jumpToLatest()
-            } label: {
-                Label("Latest", systemImage: "arrow.right.to.line")
-            }
-            .buttonStyle(.bordered)
-            .disabled(currentIndex == 0)
-
             Spacer()
-
+        }
+        .overlay(alignment: .trailing) {
+            // Counter badge on the right
             Text("\(executions.count - currentIndex) of \(executions.count)")
-                .font(.caption)
+                .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .glassEffect(.clear, in: Capsule())
         }
     }
 
@@ -113,9 +132,19 @@ struct ExecutionTimelineView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         if let startTime = currentExecution.startTime {
-                            Text(startTime, formatter: dateTimeFormatter)
-                                .font(.caption2)
-                                .fontWeight(.semibold)
+                            // Date and time display
+                            HStack(spacing: 4) {
+                                Image(systemName: "clock")
+                                    .font(.caption2)
+                                    .foregroundStyle(.blue)
+
+                                Text(startTime, formatter: timeOnlyFormatter)
+                                    .font(.caption.bold())
+
+                                Text(startTime, formatter: dateOnlyFormatter)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
 
                         executionStatusBadge(currentExecution)
@@ -138,12 +167,11 @@ struct ExecutionTimelineView: View {
 
     private func executionStatusBadge(_ execution: SearchExecution) -> some View {
         Text(executionStatusText(execution))
-            .font(.caption2)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(executionStatusColor(execution).opacity(0.2))
+            .font(.caption2.weight(.medium))
             .foregroundStyle(executionStatusColor(execution))
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .glassEffect(.clear.tint(executionStatusColor(execution).opacity(0.2)), in: Capsule())
     }
 
     // MARK: - Navigation Methods
@@ -186,6 +214,20 @@ struct ExecutionTimelineView: View {
         let formatter = DateFormatter()
         formatter.dateStyle = .short
         formatter.timeStyle = .medium
+        return formatter
+    }
+
+    private var timeOnlyFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .medium
+        return formatter
+    }
+
+    private var dateOnlyFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .none
         return formatter
     }
 }
