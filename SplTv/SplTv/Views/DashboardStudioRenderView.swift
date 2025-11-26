@@ -17,6 +17,16 @@ public struct DashboardStudioRenderView: View {
     // MARK: - State
     @State private var selectedItemId: UUID?
     @State private var showGlobalTimeline: Bool = false
+    @FocusState private var focusedItemId: UUID?
+    @State private var allItemIds: [UUID] = []
+
+    @Namespace private var glassNamespace
+
+    // Global timeline controller state
+    @ObservedObject private var globalTimeline = GlobalTimelineController.shared
+    @State private var showGlobalController: Bool = true
+    @State private var globalControllerOffset: CGSize = .zero
+    @State private var isDraggingGlobalController: Bool = false
 
     // MARK: - Initialization
     public init(dashboard: Dashboard) {
@@ -25,31 +35,45 @@ public struct DashboardStudioRenderView: View {
 
     // MARK: - Body
     public var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                // Dashboard Header
-                dashboardHeader
+        ZStack {
+            // Main dashboard content
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    // Dashboard Header
+                    dashboardHeader
 
-                Divider()
-
-                // Global Timeline Control (optional)
-                if showGlobalTimeline {
-                    globalTimelineControl
                     Divider()
-                }
 
-                // Dashboard Layout Content
-                if let layout = dashboard.layout {
-                    layoutContent(layout)
-                } else {
-                    noLayoutView
-                }
+                    // Global Timeline Control (optional - embedded)
+                    if showGlobalTimeline {
+                        globalTimelineControl
+                        Divider()
+                    }
 
-                Spacer()
+                    // Dashboard Layout Content
+                    if let layout = dashboard.layout {
+                        layoutContent(layout)
+                    } else {
+                        noLayoutView
+                    }
+
+                    Spacer()
+                }
+                .padding()
             }
-            .padding()
+            .navigationTitle(dashboard.title ?? "Dashboard")
+            .onAppear {
+                collectAllExecutionTimestamps()
+            }
+
+            // Global Timeline Controller (draggable) - controls all tables
+            if showGlobalController {
+                globalTimelineController
+            }
+
+            // Floating Glass Toolbar
+            floatingToolbar
         }
-        .navigationTitle(dashboard.title ?? "Dashboard")
     }
 
     // MARK: - Dashboard Header
@@ -168,32 +192,47 @@ public struct DashboardStudioRenderView: View {
             let rows = groupItemsIntoRows(items)
 
             ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
-                VStack(alignment: .leading, spacing: 8) {
-                    // Row header
-                    Text("Row \(index + 1)")
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
+                // Wrap each row in GlassEffectContainer for unified glass rendering
+                GlassEffectContainer(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        // Row header
+                        HStack {
+                            Text("Row \(index + 1)")
+                                .font(.headline)
+                                .foregroundStyle(.secondary)
 
-                    // Row content using Bootstrap-style grid
-                    #if os(macOS)
-                    BootstrapGridLayout(spacing: 16) {
-                        ForEach(row, id: \.id) { item in
-                            layoutItemView(item)
-                                .gridColumnWidth(parseBootstrapWidth(item.bootstrapWidth))
+                            Spacer()
+
+                            // Row badge showing visualization count (excluding inputs)
+                            let vizCount = row.filter { $0.type == "block" }.count
+                            if vizCount > 0 {
+                                Text("\(vizCount) panel\(vizCount == 1 ? "" : "s")")
+                                    .font(.caption)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .glassEffect(.clear.tint(.blue.opacity(0.3)), in: Capsule())
+                            }
                         }
-                    }
-                    #else
-                    // tvOS uses vertical stack for better focus management
-                    VStack(spacing: 16) {
-                        ForEach(row, id: \.id) { item in
-                            layoutItemView(item)
+
+                        // Row content using Bootstrap-style grid
+                        #if os(macOS)
+                        BootstrapGridLayout(spacing: 16) {
+                            ForEach(row, id: \.id) { item in
+                                layoutItemView(item)
+                                    .gridColumnWidth(calculateSmartColumnWidth(for: item, in: row))
+                            }
                         }
+                        #else
+                        // tvOS uses vertical stack for better focus management
+                        VStack(spacing: 16) {
+                            ForEach(row, id: \.id) { item in
+                                layoutItemView(item)
+                            }
+                        }
+                        #endif
                     }
-                    #endif
+                    .padding()
                 }
-                .padding()
-                .background(rowBackground)
-                .cornerRadius(12)
             }
         }
     }
@@ -242,6 +281,7 @@ public struct DashboardStudioRenderView: View {
     @ViewBuilder
     private func layoutItemView(_ item: LayoutItem) -> some View {
         let isSelected = selectedItemId == item.id
+        let isFocused = focusedItemId == item.id
 
         switch item.type {
         case "block":
@@ -253,20 +293,39 @@ public struct DashboardStudioRenderView: View {
                     isSelected: isSelected,
                     showTimeline: showGlobalTimeline
                 )
+                .focusable()
+                .focused($focusedItemId, equals: item.id)
                 .onTapGesture {
                     selectedItemId = item.id
+                    focusedItemId = item.id
                 }
+                .overlay {
+                    // Enhanced focus ring with glass effect
+                    if isFocused {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [Color.accentColor, Color.accentColor.opacity(0.6)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 3
+                            )
+                            .glassEffect(.clear.tint(.blue.opacity(0.3)), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .shadow(color: .accentColor.opacity(0.6), radius: 12, x: 0, y: 0)
+                            .shadow(color: .accentColor.opacity(0.3), radius: 24, x: 0, y: 0)
+                    }
+                }
+                .scaleEffect(isFocused ? 1.05 : 1.0)
+                .brightness(isFocused ? 0.05 : 0)
+                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
             } else {
                 placeholderView(type: "Visualization")
             }
 
         case "input":
-            // Input control
-            if let input = item.input {
-                InputItemView(input: input)
-            } else {
-                placeholderView(type: "Input")
-            }
+            // Input controls are rendered in the sidebar - skip in main body
+            EmptyView()
 
         default:
             placeholderView(type: "Unknown (\(item.type ?? "nil"))")
@@ -309,7 +368,253 @@ public struct DashboardStudioRenderView: View {
         .padding(40)
     }
 
+    // MARK: - Global Timeline Controller
+
+    private var globalTimelineController: some View {
+        VStack {
+            HStack {
+                Spacer()
+            }
+            Spacer()
+
+            HStack {
+                GlassEffectContainer(spacing: 8) {
+                    HStack(spacing: 12) {
+                        // Drag handle
+                        Image(systemName: "line.3.horizontal")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+
+                        // Jump to oldest
+                        Button {
+                            globalTimeline.jumpToOldest()
+                        } label: {
+                            Image(systemName: "backward.end.fill")
+                                .frame(width: 28, height: 28)
+                        }
+                        .buttonStyle(.plain)
+                        .glassEffect(.regular.interactive(), in: Circle())
+                        .help("Jump to oldest")
+
+                        // Step backward
+                        Button {
+                            globalTimeline.stepBackward()
+                        } label: {
+                            Image(systemName: "chevron.left")
+                                .frame(width: 28, height: 28)
+                        }
+                        .buttonStyle(.plain)
+                        .glassEffect(.regular.interactive(), in: Circle())
+                        .help("Step backward")
+                        .disabled(globalTimeline.currentTimestamp == nil)
+
+                        // Play/Pause
+                        Button {
+                            if globalTimeline.isPlaying {
+                                globalTimeline.pause()
+                            } else {
+                                globalTimeline.play()
+                            }
+                        } label: {
+                            Image(systemName: globalTimeline.isPlaying ? "pause.fill" : "play.fill")
+                                .frame(width: 32, height: 32)
+                                .foregroundStyle(.white)
+                        }
+                        .buttonStyle(.plain)
+                        .glassEffect(
+                            .regular.tint(globalTimeline.isPlaying ? .red.opacity(0.6) : .green.opacity(0.6)).interactive(),
+                            in: Circle()
+                        )
+                        .help(globalTimeline.isPlaying ? "Pause" : "Play")
+                        .disabled(globalTimeline.currentTimestamp == nil)
+
+                        // Step forward
+                        Button {
+                            globalTimeline.stepForward()
+                        } label: {
+                            Image(systemName: "chevron.right")
+                                .frame(width: 28, height: 28)
+                        }
+                        .buttonStyle(.plain)
+                        .glassEffect(.regular.interactive(), in: Circle())
+                        .help("Step forward")
+                        .disabled(globalTimeline.currentTimestamp == nil)
+
+                        // Jump to latest
+                        Button {
+                            globalTimeline.jumpToLatest()
+                        } label: {
+                            Image(systemName: "forward.end.fill")
+                                .frame(width: 28, height: 28)
+                        }
+                        .buttonStyle(.plain)
+                        .glassEffect(.regular.interactive(), in: Circle())
+                        .help("Jump to latest")
+
+                        Divider()
+                            .frame(height: 30)
+
+                        // Current timestamp
+                        if let timestamp = globalTimeline.currentTimestamp {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(timestamp, formatter: timeFormatter)
+                                    .font(.caption.bold())
+                                Text(timestamp, formatter: dateFormatter)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } else {
+                            Text("No executions")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        // Position indicator
+                        Text(globalTimeline.getPositionInfo())
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .glassEffect(.clear.tint(.blue.opacity(0.3)), in: Capsule())
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+                .offset(globalControllerOffset)
+                .scaleEffect(isDraggingGlobalController ? 1.05 : 1.0)
+                .shadow(color: .black.opacity(0.2), radius: 15, x: 0, y: 8)
+                .gesture(
+                    DragGesture()
+                        .onChanged { value in
+                            isDraggingGlobalController = true
+                            globalControllerOffset = value.translation
+                        }
+                        .onEnded { _ in
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                                isDraggingGlobalController = false
+                            }
+                        }
+                )
+                .padding()
+
+                Spacer()
+            }
+        }
+    }
+
+    private var dateFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .none
+        return formatter
+    }
+
+    private var timeFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .medium
+        return formatter
+    }
+
+    // MARK: - Floating Toolbar
+
+    private var floatingToolbar: some View {
+        VStack {
+            Spacer()
+
+            GlassEffectContainer(spacing: 12) {
+                HStack(spacing: 16) {
+                    // Refresh button
+                    Button {
+                        // Refresh action
+                        print("🔄 Refresh all data sources")
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                            .labelStyle(.iconOnly)
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular.interactive(), in: Circle())
+                    .help("Refresh all data sources")
+
+                    // Add panel button (prominent)
+                    Button {
+                        print("➕ Add new panel")
+                    } label: {
+                        Label("Add Panel", systemImage: "plus")
+                            .labelStyle(.iconOnly)
+                            .frame(width: 44, height: 44)
+                            .foregroundStyle(.white)
+                    }
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular.tint(.green).interactive(), in: Circle())
+                    .help("Add new visualization panel")
+
+                    Divider()
+                        .frame(height: 30)
+
+                    // Settings button
+                    Button {
+                        print("⚙️ Dashboard settings")
+                    } label: {
+                        Label("Settings", systemImage: "gear")
+                            .labelStyle(.iconOnly)
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular.interactive(), in: Circle())
+                    .help("Dashboard settings")
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .glassEffect(.regular.interactive(), in: Capsule())
+            }
+            .padding(.bottom, 20)
+            .shadow(color: .black.opacity(0.15), radius: 15, x: 0, y: 5)
+        }
+    }
+
     // MARK: - Helper Functions
+
+    /// Collect all execution timestamps from all data sources and initialize global timeline
+    private func collectAllExecutionTimestamps() {
+        var allTimestamps: Set<Date> = []
+
+        // Fetch all data sources for this dashboard
+        let dataSources = dashboard.dataSources?.allObjects as? [DataSource] ?? []
+
+        print("📊 Collecting timestamps from \(dataSources.count) data sources...")
+
+        for dataSource in dataSources {
+            guard let dsId = dataSource.id else { continue }
+
+            // Fetch executions for this data source
+            let fetchRequest = NSFetchRequest<SearchExecution>(entityName: "SearchExecution")
+            fetchRequest.predicate = NSPredicate(format: "dataSource.id == %@", dsId as CVarArg)
+            fetchRequest.sortDescriptors = [NSSortDescriptor(keyPath: \SearchExecution.startTime, ascending: false)]
+
+            do {
+                let executions = try viewContext.fetch(fetchRequest)
+                print("📊 DataSource \(dsId.uuidString): Found \(executions.count) executions")
+
+                // Collect timestamps
+                for execution in executions {
+                    if let startTime = execution.startTime {
+                        allTimestamps.insert(startTime)
+                    }
+                }
+            } catch {
+                print("❌ Error fetching executions for dataSource \(dsId): \(error)")
+            }
+        }
+
+        // Sort timestamps and initialize global timeline
+        let sortedTimestamps = Array(allTimestamps).sorted()
+        print("📊 Collected \(sortedTimestamps.count) unique timestamps")
+
+        globalTimeline.setTimestamps(sortedTimestamps)
+    }
 
     /// Group layout items into rows based on y-coordinate or sequential position
     private func groupItemsIntoRows(_ items: [LayoutItem]) -> [[LayoutItem]] {
@@ -317,24 +622,53 @@ public struct DashboardStudioRenderView: View {
         var currentRow: [LayoutItem] = []
         var currentY: Int32 = -1
 
-        for item in items {
-            // If y-coordinate changes significantly (or first item), start new row
-            if currentY == -1 || abs(item.y - currentY) > 10 {
-                if !currentRow.isEmpty {
+        // Check if all items have the same y-coordinate (e.g., all at y=0)
+        let uniqueYs = Set(items.map { $0.y })
+        let allSameY = uniqueYs.count == 1 && uniqueYs.first == 0
+
+        // If all items have y=0, use bootstrap width grouping instead of y-coordinate
+        if allSameY {
+            currentRow = []
+            var currentColumnWidth: CGFloat = 0
+
+            for item in items {
+                let width = parseBootstrapWidth(item.bootstrapWidth)
+
+                // If adding this item would exceed 12 columns, start new row
+                if currentColumnWidth + width > 12 && !currentRow.isEmpty {
                     rows.append(currentRow)
                     currentRow = []
+                    currentColumnWidth = 0
                 }
-                currentY = item.y
+
+                currentRow.append(item)
+                currentColumnWidth += width
             }
-            currentRow.append(item)
+
+            if !currentRow.isEmpty {
+                rows.append(currentRow)
+            }
+        } else {
+            // Use y-coordinate grouping for explicitly positioned items
+            for item in items {
+                // If y-coordinate changes significantly (or first item), start new row
+                if currentY == -1 || abs(item.y - currentY) > 10 {
+                    if !currentRow.isEmpty {
+                        rows.append(currentRow)
+                        currentRow = []
+                    }
+                    currentY = item.y
+                }
+                currentRow.append(item)
+            }
+
+            // Add last row
+            if !currentRow.isEmpty {
+                rows.append(currentRow)
+            }
         }
 
-        // Add last row
-        if !currentRow.isEmpty {
-            rows.append(currentRow)
-        }
-
-        // If no rows created (all items at y=0), group by bootstrap width to fill 12 columns
+        // If still no rows created, group by bootstrap width to fill 12 columns
         if rows.isEmpty && !items.isEmpty {
             currentRow = []
             var currentColumnWidth: CGFloat = 0
@@ -381,6 +715,37 @@ public struct DashboardStudioRenderView: View {
         return 12 // Full width by default
     }
 
+    /// Smart column width calculator with auto-even distribution
+    /// Automatically distributes panels evenly across row when no explicit widths are set
+    private func calculateSmartColumnWidth(for item: LayoutItem, in row: [LayoutItem]) -> CGFloat {
+        let parsedWidth = parseBootstrapWidth(item.bootstrapWidth)
+
+        // Single item in row - use parsed width (usually 12 = full width)
+        guard row.count > 1 else {
+            return parsedWidth
+        }
+
+        // Check if this item has default/unspecified width
+        let hasDefaultWidth = parsedWidth == 12
+
+        // If this item has default width, check if ALL items in row also have default widths
+        if hasDefaultWidth {
+            let allItemsHaveDefaultWidth = row.allSatisfy {
+                parseBootstrapWidth($0.bootstrapWidth) == 12
+            }
+
+            // If all items have default width, auto-distribute evenly
+            if allItemsHaveDefaultWidth {
+                let equalWidth = 12.0 / CGFloat(row.count)
+                print("📐 Auto-distributing \(row.count) panels: \(equalWidth) columns each")
+                return equalWidth
+            }
+        }
+
+        // Otherwise, use explicitly specified width
+        return parsedWidth
+    }
+
     private var rowBackground: some View {
         #if os(macOS)
         Color(nsColor: .controlBackgroundColor)
@@ -425,11 +790,15 @@ struct VisualizationItemView: View {
 
                 // Toggle results button
                 Button {
-                    showResults.toggle()
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        showResults.toggle()
+                    }
                 } label: {
                     Image(systemName: showResults ? "eye.slash" : "eye")
+                        .frame(width: 32, height: 32)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: Circle())
                 .help(showResults ? "Hide results" : "Show results")
             }
 
@@ -440,10 +809,48 @@ struct VisualizationItemView: View {
             }
         }
         .padding()
-        .background(itemBackground)
-        .overlay(itemBorder)
-        .cornerRadius(8)
-        .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+        .background {
+            // Subtle gradient for depth
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.03), Color.white.opacity(0.01)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        }
+        .glassEffect(
+            .regular.tint(visualizationTint).interactive(),
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+        )
+        .overlay {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Color.blue.opacity(0.5), lineWidth: 2)
+            }
+        }
+        .shadow(color: .black.opacity(0.15), radius: 12, x: 0, y: 6)
+    }
+
+    // Semantic tinting based on visualization type
+    private var visualizationTint: Color {
+        guard let type = visualization.type?.lowercased() else {
+            return .blue.opacity(0.2)
+        }
+
+        switch type {
+        case "table", "statistics":
+            return .blue.opacity(0.2)
+        case "chart", "line", "bar":
+            return .purple.opacity(0.2)
+        case "single":
+            return .green.opacity(0.2)
+        case "map":
+            return .orange.opacity(0.2)
+        default:
+            return .blue.opacity(0.2)
+        }
     }
 
     @ViewBuilder
@@ -512,8 +919,7 @@ struct InputItemView: View {
                         .font(.caption)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(Color.blue.opacity(0.1))
-                        .cornerRadius(4)
+                        .glassEffect(.clear.tint(.blue.opacity(0.3)), in: Capsule())
                 }
 
                 if let token = input.token {
@@ -538,16 +944,22 @@ struct InputItemView: View {
                 .foregroundStyle(.orange)
         }
         .padding()
-        .background(inputBackground)
-        .cornerRadius(8)
-    }
-
-    private var inputBackground: some View {
-        #if os(macOS)
-        Color(nsColor: .controlBackgroundColor).opacity(0.5)
-        #else
-        Color(uiColor: .secondarySystemBackground).opacity(0.5)
-        #endif
+        .background {
+            // Subtle gradient for depth
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.03), Color.white.opacity(0.01)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        }
+        .glassEffect(
+            .regular.tint(.green.opacity(0.2)).interactive(),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
+        .shadow(color: .black.opacity(0.12), radius: 10, x: 0, y: 5)
     }
 }
 

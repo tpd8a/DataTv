@@ -8,19 +8,63 @@ struct SearchResultsTableView: View {
     let dataSourceId: UUID
 
     @Environment(\.managedObjectContext) private var viewContext
-    @State private var executions: [SearchExecution] = []
+
+    // Use @FetchRequest for automatic CoreData observation
+    @FetchRequest private var executions: FetchedResults<SearchExecution>
+
     @State private var currentExecutionIndex: Int = 0
     @State private var isPlaying = false
     @State private var playbackTimer: Timer?
-    @State private var notificationObserver: NSObjectProtocol?
+
+    // Global timeline synchronization
+    @ObservedObject private var globalTimeline = GlobalTimelineController.shared
+
+    // Custom init to set up @FetchRequest with dynamic predicate
+    init(dashboardId: UUID, dataSourceId: UUID) {
+        self.dashboardId = dashboardId
+        self.dataSourceId = dataSourceId
+
+        // Initialize @FetchRequest with predicate for this specific dataSource
+        // IMPORTANT: Prefetch 'results' relationship to avoid faulting issues
+        let fetchRequest = NSFetchRequest<SearchExecution>(entityName: "SearchExecution")
+        fetchRequest.sortDescriptors = [NSSortDescriptor(keyPath: \SearchExecution.startTime, ascending: false)]
+        fetchRequest.predicate = NSPredicate(format: "dataSource.id == %@", dataSourceId as CVarArg)
+        fetchRequest.relationshipKeyPathsForPrefetching = ["results", "dataSource"]
+
+        _executions = FetchRequest<SearchExecution>(fetchRequest: fetchRequest, animation: .default)
+    }
+
+    // MARK: - Computed Properties
+
+    /// Find execution closest to global timeline's current timestamp
+    private var syncedExecution: SearchExecution? {
+        guard let targetTime = globalTimeline.currentTimestamp else {
+            // No global timeline set - use local index
+            return executions[safe: currentExecutionIndex]
+        }
+
+        // Find execution with startTime closest to targetTime
+        let closest = executions.min(by: { exec1, exec2 in
+            let diff1 = abs(exec1.startTime?.timeIntervalSince(targetTime) ?? .infinity)
+            let diff2 = abs(exec2.startTime?.timeIntervalSince(targetTime) ?? .infinity)
+            return diff1 < diff2
+        })
+
+        if let found = closest, let foundTime = found.startTime {
+            let timeDiff = abs(foundTime.timeIntervalSince(targetTime))
+            print("📊 Synced to execution at \(foundTime) (diff: \(timeDiff)s)")
+        }
+
+        return closest
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             ExecutionTimelineView(
-                executions: executions,
+                executions: Array(executions),  // Convert FetchedResults to Array
                 currentIndex: $currentExecutionIndex,
                 isPlaying: $isPlaying,
-                onRefresh: loadExecutions
+                onRefresh: {} // No manual refresh needed - @FetchRequest handles it
             )
 
             Divider()
@@ -28,19 +72,36 @@ struct SearchResultsTableView: View {
             resultsContentView
         }
         .onAppear {
-            loadExecutions()
-            setupNotificationListener()
+            print("📊 SearchResultsTableView: onAppear - \(executions.count) execution(s) for dataSource '\(dataSourceId)'")
+            print("📊 SearchResultsTableView: Predicate = dataSource.id == \(dataSourceId)")
+
+            // Debug: Print execution details
+            for (index, exec) in executions.enumerated() {
+                print("   [\(index)] ID: \(exec.id?.uuidString ?? "nil"), Status: \(exec.status ?? "nil"), DataSource: \(exec.dataSource?.id?.uuidString ?? "nil")")
+            }
+
             startPlaybackIfNeeded()
         }
         .onDisappear {
             stopPlayback()
-            removeNotificationListener()
         }
-        .onChange(of: isPlaying) { _, playing in
-            if playing {
+        .onChange(of: isPlaying) { oldValue, newValue in
+            print("📊 isPlaying changed: \(oldValue) -> \(newValue)")
+            if newValue {
+                print("📊 Starting playback...")
                 startPlayback()
             } else {
+                print("📊 Stopping playback...")
                 stopPlayback()
+            }
+        }
+        .onChange(of: executions.count) { _, newCount in
+            // @FetchRequest automatically updates when CoreData changes
+            print("📊 SearchResultsTableView: Execution count changed to \(newCount)")
+
+            // Reset index if it's out of bounds
+            if !executions.isEmpty && currentExecutionIndex >= executions.count {
+                currentExecutionIndex = 0
             }
         }
     }
@@ -49,17 +110,29 @@ struct SearchResultsTableView: View {
 
     @ViewBuilder
     private var resultsContentView: some View {
-        if let currentExecution = executions[safe: currentExecutionIndex] {
-            let hasPrevious = currentExecutionIndex < executions.count - 1
-            let previousExecution = hasPrevious ? executions[currentExecutionIndex + 1] : nil
+        let _ = print("📊 resultsContentView: executions.count=\(executions.count), globalTimestamp=\(globalTimeline.currentTimestamp?.description ?? "nil")")
 
-            ResultsTableContent(
-                execution: currentExecution,
-                previousExecution: previousExecution,
-                showChanges: hasPrevious
-            )
-            .id(currentExecution.id)
+        // Use synced execution from global timeline, or fallback to local index
+        if let currentExecution = syncedExecution, currentExecution.resultCount > 0 {
+            // Find previous execution for change detection
+            if let currentIndex = executions.firstIndex(where: { $0.id == currentExecution.id }) {
+                let hasPrevious = currentIndex < executions.count - 1
+                let previousExecution = hasPrevious ? executions[currentIndex + 1] : nil
+
+                let _ = print("📊 resultsContentView: Showing synced execution with \(currentExecution.resultCount) results")
+
+                ResultsTableContent(
+                    execution: currentExecution,
+                    previousExecution: previousExecution,
+                    showChanges: hasPrevious
+                )
+                .id(currentExecution.id)
+            } else {
+                let _ = print("📊 resultsContentView: Could not find execution index")
+                emptyResultsView
+            }
         } else {
+            let _ = print("📊 resultsContentView: No synced execution with results - showing empty view")
             emptyResultsView
         }
     }
@@ -81,95 +154,45 @@ struct SearchResultsTableView: View {
         .padding(.vertical, 40)
     }
 
-    // MARK: - Data Loading
-
-    private func loadExecutions() {
-        let request: NSFetchRequest<SearchExecution> = SearchExecution.fetchRequest()
-        request.predicate = NSPredicate(
-            format: "dataSource.id == %@",
-            dataSourceId as CVarArg
-        )
-        request.sortDescriptors = [NSSortDescriptor(keyPath: \SearchExecution.startTime, ascending: false)]
-
-        do {
-            executions = try viewContext.fetch(request)
-            print("📊 Loaded \(executions.count) execution(s) for dataSource '\(dataSourceId)'")
-
-            if !executions.isEmpty && currentExecutionIndex >= executions.count {
-                currentExecutionIndex = 0
-            }
-        } catch {
-            print("❌ Failed to load executions: \(error)")
-            executions = []
-        }
-    }
-
     // MARK: - Playback Control
 
     private func startPlaybackIfNeeded() {
-        // Auto-start playback if we have multiple executions
-        if executions.count > 1 {
-            isPlaying = true
-        }
+        // Auto-playback disabled - user can manually start with play button
+        let executionsWithResults = executions.filter { $0.resultCount > 0 }
+        print("📊 startPlaybackIfNeeded: \(executions.count) executions, \(executionsWithResults.count) with results - auto-playback disabled")
     }
 
     private func startPlayback() {
+        print("📊 startPlayback called")
         stopPlayback()
         playbackTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
+            print("📊 Playback timer fired - moving to next")
             moveToNext()
             if currentExecutionIndex == 0 {
+                print("📊 Reached latest execution - stopping playback")
                 stopPlayback()
             }
         }
+        print("📊 Playback timer started")
     }
 
     private func stopPlayback() {
-        playbackTimer?.invalidate()
-        playbackTimer = nil
-        isPlaying = false
+        print("📊 stopPlayback called, timer exists: \(playbackTimer != nil)")
+        if playbackTimer != nil {
+            playbackTimer?.invalidate()
+            playbackTimer = nil
+            isPlaying = false
+        }
     }
 
     private func moveToNext() {
+        print("📊 moveToNext: currentIndex=\(currentExecutionIndex), executions.count=\(executions.count)")
         guard currentExecutionIndex > 0 else {
+            print("📊 moveToNext: Already at latest (index 0) - stopping playback")
             stopPlayback()
             return
         }
         currentExecutionIndex -= 1
+        print("📊 moveToNext: Moved to index \(currentExecutionIndex)")
     }
-
-    // MARK: - Notification Handling
-
-    private func setupNotificationListener() {
-        notificationObserver = NotificationCenter.default.addObserver(
-            forName: .searchExecutionCompleted,
-            object: nil,
-            queue: .main
-        ) { notification in
-            guard let userInfo = notification.userInfo,
-                  let notificationDataSourceId = userInfo["dataSourceId"] as? UUID,
-                  notificationDataSourceId == dataSourceId else {
-                return
-            }
-
-            print("🔔 Search execution completed, reloading results")
-            loadExecutions()
-
-            if executions.count > 0 {
-                currentExecutionIndex = 0
-            }
-        }
-    }
-
-    private func removeNotificationListener() {
-        if let observer = notificationObserver {
-            NotificationCenter.default.removeObserver(observer)
-            notificationObserver = nil
-        }
-    }
-}
-
-// MARK: - Notification Extension
-
-extension Notification.Name {
-    static let searchExecutionCompleted = Notification.Name("searchExecutionCompleted")
 }
