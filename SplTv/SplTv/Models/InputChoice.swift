@@ -25,6 +25,13 @@ public struct InputOptions: Codable {
     public let token: String?
     public let changeHandler: InputChangeHandler?
 
+    // Token formatting properties
+    public let prefix: String?          // Prefix for token value (all types)
+    public let suffix: String?          // Suffix for token value (all types)
+    public let valuePrefix: String?     // Prefix for each selected value (multiselect)
+    public let valueSuffix: String?     // Suffix for each selected value (multiselect)
+    public let delimiter: String?       // Delimiter between values (multiselect)
+
     public struct ChoiceData: Codable {
         public let label: String
         public let value: String

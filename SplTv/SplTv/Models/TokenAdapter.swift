@@ -95,6 +95,60 @@ public struct TokenAdapter: Identifiable {
         return choices.first(where: { $0.value == value })?.label
     }
 
+    // MARK: - Token Formatting Properties
+
+    /// Prefix for token value (all types)
+    public var prefix: String? {
+        return parsedOptions?.prefix
+    }
+
+    /// Suffix for token value (all types)
+    public var suffix: String? {
+        return parsedOptions?.suffix
+    }
+
+    /// Prefix for each selected value (multiselect)
+    public var valuePrefix: String? {
+        return parsedOptions?.valuePrefix
+    }
+
+    /// Suffix for each selected value (multiselect)
+    public var valueSuffix: String? {
+        return parsedOptions?.valueSuffix
+    }
+
+    /// Delimiter between values (multiselect)
+    public var delimiter: String? {
+        return parsedOptions?.delimiter
+    }
+
+    /// Format a token value with prefix/suffix
+    /// For multiselect (array of values), applies valuePrefix/valueSuffix/delimiter
+    /// For single values, applies prefix/suffix
+    public func formatTokenValue(_ rawValue: String, values: [String]? = nil) -> String {
+        // Multiselect formatting (values is an array of selected values)
+        if let values = values, !values.isEmpty {
+            let formattedValues = values.map { value in
+                let vPrefix = valuePrefix ?? ""
+                let vSuffix = valueSuffix ?? ""
+                return "\(vPrefix)\(value)\(vSuffix)"
+            }
+
+            let delim = delimiter ?? ","
+            let joined = formattedValues.joined(separator: delim)
+
+            // Apply outer prefix/suffix
+            let outerPrefix = prefix ?? ""
+            let outerSuffix = suffix ?? ""
+            return "\(outerPrefix)\(joined)\(outerSuffix)"
+        }
+
+        // Single value formatting
+        let p = prefix ?? ""
+        let s = suffix ?? ""
+        return "\(p)\(rawValue)\(s)"
+    }
+
     // MARK: - Initialization
 
     public init(input: DashboardInput) {

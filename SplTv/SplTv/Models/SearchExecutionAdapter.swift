@@ -26,7 +26,7 @@ public struct SearchExecutionAdapter: Identifiable {
     }
 
     public var resultCount: Int? {
-        searchExecution.resultCount as? Int
+        searchExecution.resultCount
     }
 
     public var errorMessage: String? {

@@ -14,7 +14,7 @@ extension SearchExecution {
     @NSManaged public var startTime: Date?
     @NSManaged public var endTime: Date?
     @NSManaged public var status: String?
-    @NSManaged public var resultCount: Int64
+    @NSManaged public var resultCount: Int
     @NSManaged public var errorMessage: String?
     @NSManaged public var dataSource: DataSource?
     @NSManaged public var results: NSSet?

@@ -257,10 +257,13 @@ struct TokenInputView: View {
 
     private func saveTokenValue(_ value: String) {
         textValue = value
-        tokenManager.setTokenValue(value, forToken: adapter.name, source: .user)
-        print("🎛️ Token '\(adapter.name)' set to: '\(value)'")
 
-        // Execute change handler if present
+        // Apply formatting (prefix/suffix) before saving
+        let formattedValue = adapter.formatTokenValue(value)
+        tokenManager.setTokenValue(formattedValue, forToken: adapter.name, source: .user)
+        print("🎛️ Token '\(adapter.name)' set to: '\(formattedValue)' (raw: '\(value)')")
+
+        // Execute change handler if present (use raw value, not formatted)
         if let handler = adapter.changeHandler {
             let label = adapter.getLabel(forValue: value) ?? value
             tokenManager.executeChangeHandler(handler, selectedValue: value, selectedLabel: label)
@@ -283,7 +286,19 @@ struct TokenInputView: View {
                 } else {
                     selectedChoices.remove(choice.value)
                 }
-                saveTokenValue(Array(selectedChoices).joined(separator: ","))
+
+                // For multiselect, use array-based formatting with valuePrefix/valueSuffix/delimiter
+                let valuesArray = Array(selectedChoices)
+                let formattedValue = adapter.formatTokenValue("", values: valuesArray)
+                tokenManager.setTokenValue(formattedValue, forToken: adapter.name, source: .user)
+                print("🎛️ Multiselect token '\(adapter.name)' set to: '\(formattedValue)' (raw values: \(valuesArray))")
+
+                // Execute change handler if present (use joined raw values)
+                if let handler = adapter.changeHandler {
+                    let joinedValue = valuesArray.joined(separator: ",")
+                    tokenManager.executeChangeHandler(handler, selectedValue: joinedValue, selectedLabel: joinedValue)
+                    print("🎛️ Executed change handler for '\(adapter.name)'")
+                }
             }
         )
     }

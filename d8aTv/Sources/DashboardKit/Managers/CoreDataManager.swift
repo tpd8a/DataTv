@@ -747,7 +747,7 @@ public actor CoreDataManager {
 
             // Save results if provided
             if let results = results {
-                execution.resultCount = Int64(results.count)
+                execution.resultCount = results.count
 
                 for (index, row) in results.enumerated() {
                     let result = SearchResult(context: context)
