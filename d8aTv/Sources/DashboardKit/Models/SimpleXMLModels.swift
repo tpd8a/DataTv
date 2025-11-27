@@ -135,6 +135,13 @@ public struct SimpleXMLInput: Sendable {
     public let fieldForLabel: String?  // Field from search results to use as choice label
     public let fieldForValue: String?  // Field from search results to use as choice value
 
+    // Formatting properties (for token value manipulation)
+    public let prefix: String?          // Prefix for token value (all types)
+    public let suffix: String?          // Suffix for token value (all types)
+    public let valuePrefix: String?     // Prefix for each selected value (multiselect)
+    public let valueSuffix: String?     // Suffix for each selected value (multiselect)
+    public let delimiter: String?       // Delimiter between values (multiselect)
+
     public init(
         type: SimpleXMLInputType,
         token: String,
@@ -146,7 +153,12 @@ public struct SimpleXMLInput: Sendable {
         changeHandler: InputChangeHandler? = nil,
         search: SimpleXMLSearch? = nil,
         fieldForLabel: String? = nil,
-        fieldForValue: String? = nil
+        fieldForValue: String? = nil,
+        prefix: String? = nil,
+        suffix: String? = nil,
+        valuePrefix: String? = nil,
+        valueSuffix: String? = nil,
+        delimiter: String? = nil
     ) {
         self.type = type
         self.token = token
@@ -159,6 +171,11 @@ public struct SimpleXMLInput: Sendable {
         self.search = search
         self.fieldForLabel = fieldForLabel
         self.fieldForValue = fieldForValue
+        self.prefix = prefix
+        self.suffix = suffix
+        self.valuePrefix = valuePrefix
+        self.valueSuffix = valueSuffix
+        self.delimiter = delimiter
     }
 }
 

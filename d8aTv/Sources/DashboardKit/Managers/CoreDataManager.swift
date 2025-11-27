@@ -248,338 +248,12 @@ public actor CoreDataManager {
         let context = persistentContainer.newBackgroundContext()
         context.mergePolicy = NSMergePolicy.mergeByPropertyObjectTrump
 
-        let dashboardId = try await context.perform {
-            let dashboard = Dashboard(context: context)
-            dashboard.id = UUID()
-            dashboard.title = config.label
-            dashboard.dashboardDescription = config.description
-            dashboard.formatType = "simpleXML"
-            dashboard.createdAt = Date()
-            dashboard.updatedAt = Date()
-            dashboard.rawXML = rawXML
-
-            // Create layout (bootstrap style)
-            let layout = DashboardLayout(context: context)
-            layout.id = UUID()
-            layout.type = "bootstrap"
-            layout.dashboard = dashboard
-
-            var position = 0
-
-            // Process rows and panels
-            for row in config.rows {
-                // Calculate bootstrap width for panels in this row
-                let panelsInRow = row.panels.count
-                let bootstrapWidth = String(12 / max(panelsInRow, 1))
-
-                for panel in row.panels {
-                    // Create data source if search exists
-                    if let search = panel.search {
-                        let dataSource = DataSource(context: context)
-                        dataSource.id = UUID()
-                        dataSource.sourceId = search.id ?? "search_\(UUID().uuidString)"
-                        dataSource.type = "ds.search"
-                        dataSource.query = search.query
-                        dataSource.refresh = search.refresh
-                        dataSource.refreshType = search.refreshType
-                        dataSource.extendsId = search.base
-                        dataSource.dashboard = dashboard
-
-                        // Store earliest, latest, ref in optionsJSON
-                        var searchOptions: [String: Any] = [:]
-                        if let earliest = search.earliest {
-                            searchOptions["earliest"] = earliest
-                        }
-                        if let latest = search.latest {
-                            searchOptions["latest"] = latest
-                        }
-                        if let ref = search.ref {
-                            searchOptions["ref"] = ref
-                        }
-
-                        if !searchOptions.isEmpty,
-                           let optionsData = try? JSONSerialization.data(withJSONObject: searchOptions),
-                           let optionsString = String(data: optionsData, encoding: .utf8) {
-                            dataSource.optionsJSON = optionsString
-                        }
-
-                        // Create visualization
-                        let viz = Visualization(context: context)
-                        viz.id = UUID()
-                        viz.vizId = "viz_\(UUID().uuidString)"
-                        viz.type = "splunk.\(panel.visualization.type.rawValue)"
-                        viz.title = panel.title
-                        viz.dataSource = dataSource
-                        viz.dashboard = dashboard
-
-                        // Store visualization options and formats
-                        var vizOptions: [String: Any] = [:]
-
-                        // Add regular options
-                        if !panel.visualization.options.isEmpty {
-                            vizOptions["options"] = panel.visualization.options
-                        }
-
-                        // Add formats array
-                        if !panel.visualization.formats.isEmpty {
-                            print("💾 Storing \(panel.visualization.formats.count) format(s) for visualization")
-                            // Convert AnyCodable formats to plain dictionaries for JSON serialization
-                            let formatsArray = panel.visualization.formats.map { format -> [String: Any] in
-                                var dict: [String: Any] = [:]
-                                for (key, value) in format {
-                                    dict[key] = self.unwrapAnyCodable(value)
-                                }
-                                return dict
-                            }
-                            vizOptions["formats"] = formatsArray
-                        }
-
-                        // Serialize to JSON and store
-                        if !vizOptions.isEmpty,
-                           let optionsData = try? JSONSerialization.data(withJSONObject: vizOptions),
-                           let optionsString = String(data: optionsData, encoding: .utf8) {
-                            viz.optionsJSON = optionsString
-                            print("💾 Stored optionsJSON: \(optionsString.prefix(200))...")
-                        }
-
-                        // Create layout item
-                        let layoutItem = LayoutItem(context: context)
-                        layoutItem.id = UUID()
-                        layoutItem.type = "block"
-                        layoutItem.bootstrapWidth = bootstrapWidth // Calculated based on panels in row
-                        layoutItem.position = Int32(position)
-                        layoutItem.layout = layout
-                        layoutItem.visualization = viz
-
-                        position += 1
-                    }
-
-                    // Process panel-level inputs (if any)
-                    for simpleInput in panel.inputs {
-                        let input = DashboardInput(context: context)
-                        input.id = UUID()
-                        input.inputId = "input_\(UUID().uuidString)"
-                        input.type = "input.\(simpleInput.type.rawValue)"
-                        input.title = simpleInput.label
-                        input.token = simpleInput.token
-                        input.defaultValue = simpleInput.defaultValue
-                        input.dashboard = dashboard
-
-                        print("💾 Saving panel input: \(simpleInput.token)")
-
-                        // Store choices and change handler in optionsJSON
-                        var inputOptions: [String: Any] = [:]
-
-                        if !simpleInput.choices.isEmpty {
-                            let choicesData = simpleInput.choices.map { choice -> [String: Any] in
-                                return [
-                                    "value": choice.value,
-                                    "label": choice.label
-                                ]
-                            }
-                            inputOptions["choices"] = choicesData
-                        }
-
-                        // Add change handler if present
-                        if let changeHandler = simpleInput.changeHandler {
-                            if let handlerData = try? JSONEncoder().encode(changeHandler),
-                               let handlerDict = try? JSONSerialization.jsonObject(with: handlerData) as? [String: Any] {
-                                inputOptions["changeHandler"] = handlerDict
-                                print("💾 Storing change handler for panel input: \(simpleInput.token)")
-                            }
-                        }
-
-                        // Add formatting options if present (prefix/suffix for all types, valuePrefix/valueSuffix/delimiter for multiselect)
-                        if simpleInput.prefix != nil || simpleInput.suffix != nil || simpleInput.valuePrefix != nil ||
-                           simpleInput.valueSuffix != nil || simpleInput.delimiter != nil {
-                            print("💾 Storing formatting options for panel input: \(simpleInput.token)")
-                            if let prefix = simpleInput.prefix {
-                                inputOptions["prefix"] = prefix
-                            }
-                            if let suffix = simpleInput.suffix {
-                                inputOptions["suffix"] = suffix
-                            }
-                            if let valuePrefix = simpleInput.valuePrefix {
-                                inputOptions["valuePrefix"] = valuePrefix
-                            }
-                            if let valueSuffix = simpleInput.valueSuffix {
-                                inputOptions["valueSuffix"] = valueSuffix
-                            }
-                            if let delimiter = simpleInput.delimiter {
-                                inputOptions["delimiter"] = delimiter
-                            }
-                        }
-
-                        // Create DataSource for input search if present
-                        if let inputSearch = simpleInput.search {
-                            let searchSourceId = "input_search_\(simpleInput.token)"
-                            let dataSource = DataSource(context: context)
-                            dataSource.id = UUID()
-                            dataSource.sourceId = searchSourceId
-                            dataSource.type = "ds.search"
-                            dataSource.query = inputSearch.query
-                            dataSource.refresh = inputSearch.refresh
-                            dataSource.refreshType = inputSearch.refreshType
-                            dataSource.dashboard = dashboard
-
-                            // Store earliest/latest in optionsJSON
-                            var searchOptions: [String: Any] = [:]
-                            if let earliest = inputSearch.earliest {
-                                searchOptions["earliest"] = earliest
-                            }
-                            if let latest = inputSearch.latest {
-                                searchOptions["latest"] = latest
-                            }
-                            if !searchOptions.isEmpty,
-                               let optionsData = try? JSONSerialization.data(withJSONObject: searchOptions),
-                               let optionsString = String(data: optionsData, encoding: .utf8) {
-                                dataSource.optionsJSON = optionsString
-                            }
-
-                            // Add search metadata to input options
-                            inputOptions["choiceSearch"] = [
-                                "sourceId": searchSourceId,
-                                "fieldForLabel": simpleInput.fieldForLabel ?? simpleInput.fieldForValue ?? "value",
-                                "fieldForValue": simpleInput.fieldForValue ?? "value"
-                            ]
-
-                            print("💾 Created DataSource for panel input search: \(searchSourceId)")
-                        }
-
-                        if !inputOptions.isEmpty,
-                           let optionsData = try? JSONSerialization.data(withJSONObject: inputOptions),
-                           let optionsString = String(data: optionsData, encoding: .utf8) {
-                            input.optionsJSON = optionsString
-                        }
-
-                        // Create layout item for input
-                        let inputLayoutItem = LayoutItem(context: context)
-                        inputLayoutItem.id = UUID()
-                        inputLayoutItem.type = "input"
-                        inputLayoutItem.bootstrapWidth = bootstrapWidth // Same width as panels in this row
-                        inputLayoutItem.position = Int32(position)
-                        inputLayoutItem.layout = layout
-                        inputLayoutItem.input = input
-
-                        position += 1
-                    }
-                }
-            }
-
-            // Process inputs
-            if let fieldsets = config.fieldsets {
-                for fieldset in fieldsets {
-                    for simpleInput in fieldset.inputs {
-                        let input = DashboardInput(context: context)
-                        input.id = UUID()
-                        input.inputId = "input_\(UUID().uuidString)"
-                        input.type = "input.\(simpleInput.type.rawValue)"
-                        input.title = simpleInput.label
-                        input.token = simpleInput.token
-                        input.defaultValue = simpleInput.defaultValue
-                        input.dashboard = dashboard
-
-                        // Store choices and change handler in optionsJSON
-                        var inputOptions: [String: Any] = [:]
-
-                        if !simpleInput.choices.isEmpty {
-                            let choicesData = simpleInput.choices.map { choice -> [String: Any] in
-                                return [
-                                    "value": choice.value,
-                                    "label": choice.label
-                                ]
-                            }
-                            inputOptions["choices"] = choicesData
-                        }
-
-                        // Add change handler if present
-                        if let changeHandler = simpleInput.changeHandler {
-                            if let handlerData = try? JSONEncoder().encode(changeHandler),
-                               let handlerDict = try? JSONSerialization.jsonObject(with: handlerData) as? [String: Any] {
-                                inputOptions["changeHandler"] = handlerDict
-                                print("💾 Storing change handler for fieldset input: \(simpleInput.token)")
-                            }
-                        }
-
-                        // Add formatting options if present (prefix/suffix for all types, valuePrefix/valueSuffix/delimiter for multiselect)
-                        if simpleInput.prefix != nil || simpleInput.suffix != nil || simpleInput.valuePrefix != nil ||
-                           simpleInput.valueSuffix != nil || simpleInput.delimiter != nil {
-                            print("💾 Storing formatting options for fieldset input: \(simpleInput.token)")
-                            if let prefix = simpleInput.prefix {
-                                inputOptions["prefix"] = prefix
-                            }
-                            if let suffix = simpleInput.suffix {
-                                inputOptions["suffix"] = suffix
-                            }
-                            if let valuePrefix = simpleInput.valuePrefix {
-                                inputOptions["valuePrefix"] = valuePrefix
-                            }
-                            if let valueSuffix = simpleInput.valueSuffix {
-                                inputOptions["valueSuffix"] = valueSuffix
-                            }
-                            if let delimiter = simpleInput.delimiter {
-                                inputOptions["delimiter"] = delimiter
-                            }
-                        }
-
-                        // Create DataSource for input search if present
-                        if let inputSearch = simpleInput.search {
-                            let searchSourceId = "input_search_\(simpleInput.token)"
-                            let dataSource = DataSource(context: context)
-                            dataSource.id = UUID()
-                            dataSource.sourceId = searchSourceId
-                            dataSource.type = "ds.search"
-                            dataSource.query = inputSearch.query
-                            dataSource.refresh = inputSearch.refresh
-                            dataSource.refreshType = inputSearch.refreshType
-                            dataSource.dashboard = dashboard
-
-                            // Store earliest/latest in optionsJSON
-                            var searchOptions: [String: Any] = [:]
-                            if let earliest = inputSearch.earliest {
-                                searchOptions["earliest"] = earliest
-                            }
-                            if let latest = inputSearch.latest {
-                                searchOptions["latest"] = latest
-                            }
-                            if !searchOptions.isEmpty,
-                               let optionsData = try? JSONSerialization.data(withJSONObject: searchOptions),
-                               let optionsString = String(data: optionsData, encoding: .utf8) {
-                                dataSource.optionsJSON = optionsString
-                            }
-
-                            // Add search metadata to input options
-                            inputOptions["choiceSearch"] = [
-                                "sourceId": searchSourceId,
-                                "fieldForLabel": simpleInput.fieldForLabel ?? simpleInput.fieldForValue ?? "value",
-                                "fieldForValue": simpleInput.fieldForValue ?? "value"
-                            ]
-
-                            print("💾 Created DataSource for input search: \(searchSourceId)")
-                        }
-
-                        if !inputOptions.isEmpty,
-                           let optionsData = try? JSONSerialization.data(withJSONObject: inputOptions),
-                           let optionsString = String(data: optionsData, encoding: .utf8) {
-                            input.optionsJSON = optionsString
-                        }
-
-                        // Create layout item for input
-                        let layoutItem = LayoutItem(context: context)
-                        layoutItem.id = UUID()
-                        layoutItem.type = "input"
-                        layoutItem.bootstrapWidth = "12"
-                        layoutItem.position = Int32(position)
-                        layoutItem.layout = layout
-                        layoutItem.input = input
-
-                        position += 1
-                    }
-                }
-            }
-
-            try context.save()
-            return dashboard.id!
+        let dashboardId = try await context.perform { [config, rawXML] in
+            return try self.saveSimpleXMLDashboardSync(
+                config: config,
+                rawXML: rawXML,
+                context: context
+            )
         }
 
         // Populate saved search metadata after dashboard is saved
@@ -588,6 +262,358 @@ public actor CoreDataManager {
         }
 
         return dashboardId
+    }
+
+    // MARK: - SimpleXML Save Helper
+
+    /// Synchronous helper to save SimpleXML dashboard entities
+    private nonisolated func saveSimpleXMLDashboardSync(
+        config: SimpleXMLConfiguration,
+        rawXML: String?,
+        context: NSManagedObjectContext
+    ) throws -> UUID {
+        let dashboard = Dashboard(context: context)
+        dashboard.id = UUID()
+        dashboard.title = config.label
+        dashboard.dashboardDescription = config.description
+        dashboard.formatType = "simpleXML"
+        dashboard.createdAt = Date()
+        dashboard.updatedAt = Date()
+        dashboard.rawXML = rawXML
+
+        // Create layout (bootstrap style)
+        let layout = DashboardLayout(context: context)
+        layout.id = UUID()
+        layout.type = "bootstrap"
+        layout.dashboard = dashboard
+
+        var position = 0
+
+        // Process rows and panels - delegate to existing code
+        position = try processRowsAndPanels(
+            config.rows,
+            dashboard: dashboard,
+            layout: layout,
+            startPosition: position,
+            context: context
+        )
+
+        // Process fieldsets
+        position = try processFieldsets(
+            config.fieldsets,
+            dashboard: dashboard,
+            layout: layout,
+            startPosition: position,
+            context: context
+        )
+
+        try context.save()
+        return dashboard.id!
+    }
+
+    /// Process all rows and panels
+    private nonisolated func processRowsAndPanels(
+        _ rows: [SimpleXMLRow],
+        dashboard: Dashboard,
+        layout: DashboardLayout,
+        startPosition: Int,
+        context: NSManagedObjectContext
+    ) throws -> Int {
+        var position = startPosition
+
+        for row in rows {
+            // Calculate bootstrap width for panels in this row
+            let panelsInRow = row.panels.count
+            let bootstrapWidth = String(12 / max(panelsInRow, 1))
+
+            for panel in row.panels {
+                // Create data source if search exists
+                if let search = panel.search {
+                    position = try createPanelVisualization(
+                        panel: panel,
+                        search: search,
+                        dashboard: dashboard,
+                        layout: layout,
+                        bootstrapWidth: bootstrapWidth,
+                        position: position,
+                        context: context
+                    )
+                }
+
+                // Process panel-level inputs
+                position = try processPanelInputs(
+                    panel.inputs,
+                    dashboard: dashboard,
+                    layout: layout,
+                    bootstrapWidth: bootstrapWidth,
+                    startPosition: position,
+                    context: context
+                )
+            }
+        }
+
+        return position
+    }
+
+    /// Create visualization for a panel
+    private nonisolated func createPanelVisualization(
+        panel: SimpleXMLPanel,
+        search: SimpleXMLSearch,
+        dashboard: Dashboard,
+        layout: DashboardLayout,
+        bootstrapWidth: String,
+        position: Int,
+        context: NSManagedObjectContext
+    ) throws -> Int {
+        let dataSource = DataSource(context: context)
+        dataSource.id = UUID()
+        dataSource.sourceId = search.id ?? "search_\(UUID().uuidString)"
+        dataSource.type = "ds.search"
+        dataSource.query = search.query
+        dataSource.refresh = search.refresh
+        dataSource.refreshType = search.refreshType
+        dataSource.extendsId = search.base
+        dataSource.dashboard = dashboard
+
+        // Store earliest, latest, ref in optionsJSON
+        var searchOptions: [String: Any] = [:]
+        if let earliest = search.earliest {
+            searchOptions["earliest"] = earliest
+        }
+        if let latest = search.latest {
+            searchOptions["latest"] = latest
+        }
+        if let ref = search.ref {
+            searchOptions["ref"] = ref
+        }
+
+        if !searchOptions.isEmpty,
+           let optionsData = try? JSONSerialization.data(withJSONObject: searchOptions),
+           let optionsString = String(data: optionsData, encoding: .utf8) {
+            dataSource.optionsJSON = optionsString
+        }
+
+        // Create visualization
+        let viz = Visualization(context: context)
+        viz.id = UUID()
+        viz.vizId = "viz_\(UUID().uuidString)"
+        viz.type = "splunk.\(panel.visualization.type.rawValue)"
+        viz.title = panel.title
+        viz.dataSource = dataSource
+        viz.dashboard = dashboard
+
+        // Store visualization options and formats
+        var vizOptions: [String: Any] = [:]
+
+        // Add regular options
+        if !panel.visualization.options.isEmpty {
+            vizOptions["options"] = panel.visualization.options
+        }
+
+        // Add formats array
+        if !panel.visualization.formats.isEmpty {
+            print("💾 Storing \(panel.visualization.formats.count) format(s) for visualization")
+            let formatsArray = panel.visualization.formats.map { format -> [String: Any] in
+                var dict: [String: Any] = [:]
+                for (key, value) in format {
+                    dict[key] = unwrapAnyCodable(value)
+                }
+                return dict
+            }
+            vizOptions["formats"] = formatsArray
+        }
+
+        // Serialize to JSON and store
+        if !vizOptions.isEmpty,
+           let optionsData = try? JSONSerialization.data(withJSONObject: vizOptions),
+           let optionsString = String(data: optionsData, encoding: .utf8) {
+            viz.optionsJSON = optionsString
+            print("💾 Stored optionsJSON: \(optionsString.prefix(200))...")
+        }
+
+        // Create layout item
+        let layoutItem = LayoutItem(context: context)
+        layoutItem.id = UUID()
+        layoutItem.type = "block"
+        layoutItem.bootstrapWidth = bootstrapWidth
+        layoutItem.position = Int32(position)
+        layoutItem.layout = layout
+        layoutItem.visualization = viz
+
+        return position + 1
+    }
+
+    /// Process panel inputs
+    private nonisolated func processPanelInputs(
+        _ inputs: [SimpleXMLInput],
+        dashboard: Dashboard,
+        layout: DashboardLayout,
+        bootstrapWidth: String,
+        startPosition: Int,
+        context: NSManagedObjectContext
+    ) throws -> Int {
+        var position = startPosition
+
+        for simpleInput in inputs {
+            position = try createInputEntity(
+                simpleInput: simpleInput,
+                dashboard: dashboard,
+                layout: layout,
+                bootstrapWidth: bootstrapWidth,
+                position: position,
+                context: context,
+                debugPrefix: "panel"
+            )
+        }
+
+        return position
+    }
+
+    /// Process fieldsets
+    private nonisolated func processFieldsets(
+        _ fieldsets: [SimpleXMLFieldset]?,
+        dashboard: Dashboard,
+        layout: DashboardLayout,
+        startPosition: Int,
+        context: NSManagedObjectContext
+    ) throws -> Int {
+        guard let fieldsets = fieldsets else { return startPosition }
+
+        var position = startPosition
+
+        for fieldset in fieldsets {
+            for simpleInput in fieldset.inputs {
+                position = try createInputEntity(
+                    simpleInput: simpleInput,
+                    dashboard: dashboard,
+                    layout: layout,
+                    bootstrapWidth: "12",
+                    position: position,
+                    context: context,
+                    debugPrefix: "fieldset"
+                )
+            }
+        }
+
+        return position
+    }
+
+    /// Create input entity with all options
+    private nonisolated func createInputEntity(
+        simpleInput: SimpleXMLInput,
+        dashboard: Dashboard,
+        layout: DashboardLayout,
+        bootstrapWidth: String,
+        position: Int,
+        context: NSManagedObjectContext,
+        debugPrefix: String
+    ) throws -> Int {
+        let input = DashboardInput(context: context)
+        input.id = UUID()
+        input.inputId = "input_\(UUID().uuidString)"
+        input.type = "input.\(simpleInput.type.rawValue)"
+        input.title = simpleInput.label
+        input.token = simpleInput.token
+        input.defaultValue = simpleInput.defaultValue
+        input.dashboard = dashboard
+
+        print("💾 Saving \(debugPrefix) input: \(simpleInput.token)")
+
+        // Store choices and change handler in optionsJSON
+        var inputOptions: [String: Any] = [:]
+
+        if !simpleInput.choices.isEmpty {
+            let choicesData = simpleInput.choices.map { choice -> [String: Any] in
+                return [
+                    "value": choice.value,
+                    "label": choice.label
+                ]
+            }
+            inputOptions["choices"] = choicesData
+        }
+
+        // Add change handler if present
+        if let changeHandler = simpleInput.changeHandler {
+            if let handlerData = try? JSONEncoder().encode(changeHandler),
+               let handlerDict = try? JSONSerialization.jsonObject(with: handlerData) as? [String: Any] {
+                inputOptions["changeHandler"] = handlerDict
+                print("💾 Storing change handler for \(debugPrefix) input: \(simpleInput.token)")
+            }
+        }
+
+        // Add formatting options if present
+        if simpleInput.prefix != nil || simpleInput.suffix != nil || simpleInput.valuePrefix != nil ||
+           simpleInput.valueSuffix != nil || simpleInput.delimiter != nil {
+            print("💾 Storing formatting options for \(debugPrefix) input: \(simpleInput.token)")
+            if let prefix = simpleInput.prefix {
+                inputOptions["prefix"] = prefix
+            }
+            if let suffix = simpleInput.suffix {
+                inputOptions["suffix"] = suffix
+            }
+            if let valuePrefix = simpleInput.valuePrefix {
+                inputOptions["valuePrefix"] = valuePrefix
+            }
+            if let valueSuffix = simpleInput.valueSuffix {
+                inputOptions["valueSuffix"] = valueSuffix
+            }
+            if let delimiter = simpleInput.delimiter {
+                inputOptions["delimiter"] = delimiter
+            }
+        }
+
+        // Create DataSource for input search if present
+        if let inputSearch = simpleInput.search {
+            let searchSourceId = "input_search_\(simpleInput.token)"
+            let dataSource = DataSource(context: context)
+            dataSource.id = UUID()
+            dataSource.sourceId = searchSourceId
+            dataSource.type = "ds.search"
+            dataSource.query = inputSearch.query
+            dataSource.refresh = inputSearch.refresh
+            dataSource.refreshType = inputSearch.refreshType
+            dataSource.dashboard = dashboard
+
+            // Store earliest/latest in optionsJSON
+            var searchOptions: [String: Any] = [:]
+            if let earliest = inputSearch.earliest {
+                searchOptions["earliest"] = earliest
+            }
+            if let latest = inputSearch.latest {
+                searchOptions["latest"] = latest
+            }
+            if !searchOptions.isEmpty,
+               let optionsData = try? JSONSerialization.data(withJSONObject: searchOptions),
+               let optionsString = String(data: optionsData, encoding: .utf8) {
+                dataSource.optionsJSON = optionsString
+            }
+
+            // Add search metadata to input options
+            inputOptions["choiceSearch"] = [
+                "sourceId": searchSourceId,
+                "fieldForLabel": simpleInput.fieldForLabel ?? simpleInput.fieldForValue ?? "value",
+                "fieldForValue": simpleInput.fieldForValue ?? "value"
+            ]
+
+            print("💾 Created DataSource for \(debugPrefix) input search: \(searchSourceId)")
+        }
+
+        if !inputOptions.isEmpty,
+           let optionsData = try? JSONSerialization.data(withJSONObject: inputOptions),
+           let optionsString = String(data: optionsData, encoding: .utf8) {
+            input.optionsJSON = optionsString
+        }
+
+        // Create layout item for input
+        let layoutItem = LayoutItem(context: context)
+        layoutItem.id = UUID()
+        layoutItem.type = "input"
+        layoutItem.bootstrapWidth = bootstrapWidth
+        layoutItem.position = Int32(position)
+        layoutItem.layout = layout
+        layoutItem.input = input
+
+        return position + 1
     }
 
     // MARK: - Helper Functions
@@ -721,7 +747,7 @@ public actor CoreDataManager {
 
             // Save results if provided
             if let results = results {
-                execution.resultCount = results.count
+                execution.resultCount = Int64(results.count)
 
                 for (index, row) in results.enumerated() {
                     let result = SearchResult(context: context)
