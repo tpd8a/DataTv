@@ -1212,15 +1212,24 @@ public actor CoreDataManager {
 
         print("🔒 SSL Configuration: useSSL=\(useSSLProtocol), validateSSL=\(validateSSL)")
 
-        // Ensure a SplunkDataSource is registered for this config
-        let splunkDataSource = SplunkDataSource(
-            host: configHost,
-            port: configPort,
-            authToken: finalToken,
-            useSSL: useSSLProtocol,
-            validateSSL: validateSSL
-        )
-        registerDataSource(splunkDataSource, withId: configId.uuidString)
+        // Check if we already have a SplunkDataSource for this config (reuse for connection pooling)
+        let splunkDataSource: SplunkDataSource
+        if let existingDataSource = getDataSource(withId: configId.uuidString) as? SplunkDataSource {
+            // Reuse existing DataSource to preserve URLSession and connection pool
+            print("♻️ Reusing existing SplunkDataSource for config \(configId) (preserves connection pool)")
+            splunkDataSource = existingDataSource
+        } else {
+            // No existing DataSource - create new one
+            print("🆕 Creating new SplunkDataSource for config \(configId)")
+            splunkDataSource = SplunkDataSource(
+                host: configHost,
+                port: configPort,
+                authToken: finalToken,
+                useSSL: useSSLProtocol,
+                validateSSL: validateSSL
+            )
+            registerDataSource(splunkDataSource, withId: configId.uuidString)
+        }
 
         // Build search parameters
         // Use timeRange parameter if provided, otherwise use extracted values from DataSource

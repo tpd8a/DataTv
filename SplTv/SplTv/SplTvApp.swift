@@ -20,10 +20,7 @@ struct SplTvApp: App {
     
     // MARK: - Core Data Context
 
-    // Use CoreDataManager's context to ensure consistency with dashboard sync
-    private var managedObjectContext: NSManagedObjectContext {
-        CoreDataManager.shared.viewContext
-    }
+    public let persistenceController = PersistenceController.shared
     
     
     // MARK: - Scene
@@ -31,7 +28,7 @@ struct SplTvApp: App {
         #if os(macOS)
         WindowGroup {
             DashboardMainView()
-                .environment(\.managedObjectContext, managedObjectContext)
+                .environment(\.managedObjectContext, persistenceController.context)
                 .frame(minWidth: 800, minHeight: 600)
         }
         .commands {
@@ -56,13 +53,13 @@ struct SplTvApp: App {
         
         Settings {
             SettingsView()
-                .environment(\.managedObjectContext, managedObjectContext)
+                .environment(\.managedObjectContext, persistenceController.context)
         }
         
         #elseif os(tvOS)
         WindowGroup {
             DashboardMainView()
-                .environment(\.managedObjectContext, managedObjectContext)
+                .environment(\.managedObjectContext, persistenceController.context)
         }
         #endif
     }
@@ -90,7 +87,8 @@ struct SettingsView: View {
     @AppStorage("splunkTimeout") private var splunkTimeout = 30.0
     @AppStorage("splunkMaxRetries") private var splunkMaxRetries = 3
     @AppStorage("splunkRetryDelay") private var splunkRetryDelay = 2.0
-    
+    @AppStorage("searchPollingInterval") private var searchPollingInterval = 5.0
+
     // MARK: - SSL Settings
     @AppStorage("splunkAllowInsecure") private var splunkAllowInsecure = false
     @AppStorage("splunkValidateSSL") private var splunkValidateSSL = true
@@ -151,8 +149,18 @@ struct SettingsView: View {
                             .frame(width: 300)
                     }
                     .help("Splunk server URL including port (e.g., https://splunk.example.com:8089)")
+
+                    LabeledContent("Polling Interval:") {
+                        HStack {
+                            Stepper("\(Int(searchPollingInterval))", value: $searchPollingInterval, in: 1...30, step: 1)
+                                .frame(width: 100)
+                            Text("seconds")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .help("How often to check search execution status (default: 5 seconds)")
                 }
-                
+
                 Section("Authentication") {
                     Picker("Authentication Type:", selection: $splunkAuthType) {
                         Text("Basic (Username/Password)").tag("basic")
@@ -958,7 +966,7 @@ struct SettingsView: View {
     }
 
     private func clearAllCoreData() {
-        let context = CoreDataManager.shared.viewContext
+        let context = PersistenceController.shared.context
 
         // Delete all DashboardKit entities
         let entityNames = [
@@ -1021,6 +1029,7 @@ struct SettingsView: View {
         splunkTimeout = 30.0
         splunkMaxRetries = 3
         splunkRetryDelay = 2.0
+        searchPollingInterval = 5.0
         splunkAllowInsecure = false
         splunkValidateSSL = true
     }

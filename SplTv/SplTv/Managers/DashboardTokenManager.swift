@@ -55,21 +55,47 @@ public class DashboardTokenManager: ObservableObject {
 
             // Initialize with default or initial value
             let initialValue = adapter.initialValue ?? ""
-            let tokenValue = TokenValue(
-                name: adapter.name,
-                value: initialValue,
-                source: .default,
-                lastUpdated: Date()
-            )
 
-            tokenValues[adapter.name] = tokenValue
-            print("  ✅ Token '\(adapter.name)': \(initialValue)")
+            // Apply formatting based on input type
+            let formattedValue: String
+            let rawValue: String
 
-            // Execute change handler if present (with initial value)
-            if let handler = adapter.changeHandler, !initialValue.isEmpty {
-                let label = adapter.getLabel(forValue: initialValue) ?? initialValue
-                executeChangeHandler(handler, selectedValue: initialValue, selectedLabel: label)
-                print("  🔄 Executed change handler for '\(adapter.name)'")
+            if ["multiselect", "checkbox"].contains(adapter.type.lowercased()) && !initialValue.isEmpty {
+                // Parse comma-separated values and apply multiselect formatting
+                let values = initialValue.split(separator: ",").map {
+                    String($0).trimmingCharacters(in: .whitespaces)
+                }
+                formattedValue = adapter.formatTokenValue("", values: values)
+                rawValue = initialValue
+            } else if !initialValue.isEmpty {
+                // For single-value types, format with prefix/suffix
+                formattedValue = adapter.formatTokenValue(initialValue)
+                rawValue = initialValue
+            } else {
+                // Empty value - don't set token at all
+                formattedValue = ""
+                rawValue = ""
+            }
+
+            // Only set token if there's a value
+            if !formattedValue.isEmpty {
+                let tokenValue = TokenValue(
+                    name: adapter.name,
+                    value: formattedValue,
+                    source: .default,
+                    lastUpdated: Date()
+                )
+                tokenValues[adapter.name] = tokenValue
+                print("  ✅ Token '\(adapter.name)': '\(formattedValue)' (from: '\(rawValue)')")
+
+                // Execute change handler if present (with RAW initial value, not formatted)
+                if let handler = adapter.changeHandler {
+                    let label = adapter.getLabel(forValue: rawValue) ?? rawValue
+                    executeChangeHandler(handler, selectedValue: rawValue, selectedLabel: label)
+                    print("  🔄 Executed change handler for '\(adapter.name)'")
+                }
+            } else {
+                print("  ⚪ Token '\(adapter.name)': No default value, token not set")
             }
         }
 
@@ -102,6 +128,29 @@ public class DashboardTokenManager: ObservableObject {
                 "tokenValue": value,
                 "dashboardId": activeDashboardId as Any,
                 "source": source.rawValue
+            ]
+        )
+    }
+
+    /// Unset (remove) a token value
+    public func unsetTokenValue(forToken name: String) {
+        guard activeDashboardId != nil else {
+            print("⚠️ No active dashboard, cannot unset token value")
+            return
+        }
+
+        tokenValues.removeValue(forKey: name)
+        print("🎛️ Token '\(name)' unset (removed)")
+
+        // Post notification for listeners
+        NotificationCenter.default.post(
+            name: .tokenValueChanged,
+            object: nil,
+            userInfo: [
+                "tokenName": name,
+                "tokenValue": "",
+                "dashboardId": activeDashboardId as Any,
+                "source": TokenValueSource.user.rawValue
             ]
         )
     }

@@ -60,6 +60,36 @@ public final class DashboardRefreshWorker: ObservableObject {
         }
     }
 
+    /// Start refresh timers for a specific dashboard that has searches with refresh intervals
+    /// - Parameter dashboardId: The ID of the dashboard to start timers for
+    public func startTimersForDashboard(_ dashboardId: UUID) async {
+        do {
+            print("🔄 Starting refresh timers for dashboard: \(dashboardId)")
+
+            // Use CoreDataManager to get searches with refresh for this dashboard
+            let searchesWithRefresh = try await CoreDataManager.shared.getSearchesWithRefresh(in: dashboardId)
+
+            guard !searchesWithRefresh.isEmpty else {
+                print("ℹ️ No searches with refresh intervals found for dashboard \(dashboardId)")
+                return
+            }
+
+            var timerCount = 0
+            for (searchId, interval) in searchesWithRefresh {
+                startTimer(for: searchId, interval: interval, in: dashboardId)
+                timerCount += 1
+            }
+
+            await MainActor.run {
+                print("✅ Started \(timerCount) refresh timer(s) for dashboard \(dashboardId)")
+                self.isRunning = true
+                self.updateState()
+            }
+        } catch {
+            print("❌ Error starting timers for dashboard \(dashboardId): \(error)")
+        }
+    }
+
     /// Stop all refresh timers
     public func stopAllTimers() {
         let count = timers.count

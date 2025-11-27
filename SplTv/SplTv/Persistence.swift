@@ -23,47 +23,13 @@ struct PersistenceController {
     let container: NSPersistentContainer
 
     private init() {
-        // Find the DashboardKit resource bundle
-        var foundModel: NSManagedObjectModel?
-
-        // First, try to find the DashboardKit_DashboardKit bundle in the app's Resources
-        if let resourceURL = Bundle.main.resourceURL,
-           let bundleURL = Bundle(url: resourceURL.appendingPathComponent("DashboardKit_DashboardKit.bundle")),
-           let modelURL = bundleURL.url(forResource: "DashboardModel", withExtension: "momd"),
-           let model = NSManagedObjectModel(contentsOf: modelURL) {
-            foundModel = model
-        }
-
-        // Fallback: search all loaded bundles
-        if foundModel == nil {
-            for bundle in Bundle.allBundles {
-                if let url = bundle.url(forResource: "DashboardModel", withExtension: "momd"),
-                   let model = NSManagedObjectModel(contentsOf: url) {
-                    foundModel = model
-                    break
-                }
-            }
-        }
-
-        guard let model = foundModel else {
-            fatalError("Failed to load DashboardKit CoreData model 'DashboardModel'. Check that DashboardKit package is properly linked.")
-        }
-
-        // IMPORTANT: Use "DashboardModel" to match CoreDataManager's persistent store name
-        // This ensures both use the same SQLite database file
-        container = NSPersistentContainer(name: "DashboardModel", managedObjectModel: model)
-        container.loadPersistentStores { description, error in
-            if let error = error {
-                fatalError("Failed to load persistent stores: \(error)")
-            }
-        }
-
-        container.viewContext.automaticallyMergesChangesFromParent = true
-        container.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+        // Delegate to CoreDataManager - don't create duplicate container
+        // This ensures a single NSPersistentContainer instance across the app
+        container = CoreDataManager.shared.persistentContainer
     }
 
     /// Get the managed object context
     var context: NSManagedObjectContext {
-        return container.viewContext
+        return CoreDataManager.shared.viewContext
     }
 }

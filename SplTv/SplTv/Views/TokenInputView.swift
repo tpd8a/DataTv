@@ -289,9 +289,16 @@ struct TokenInputView: View {
 
                 // For multiselect, use array-based formatting with valuePrefix/valueSuffix/delimiter
                 let valuesArray = Array(selectedChoices)
-                let formattedValue = adapter.formatTokenValue("", values: valuesArray)
-                tokenManager.setTokenValue(formattedValue, forToken: adapter.name, source: .user)
-                print("🎛️ Multiselect token '\(adapter.name)' set to: '\(formattedValue)' (raw values: \(valuesArray))")
+
+                if valuesArray.isEmpty {
+                    // No selections - UNSET the token (remove from dictionary)
+                    tokenManager.unsetTokenValue(forToken: adapter.name)
+                } else {
+                    // Format and set token value
+                    let formattedValue = adapter.formatTokenValue("", values: valuesArray)
+                    tokenManager.setTokenValue(formattedValue, forToken: adapter.name, source: .user)
+                    print("🎛️ Multiselect token '\(adapter.name)' set to: '\(formattedValue)' (raw values: \(valuesArray))")
+                }
 
                 // Execute change handler if present (use joined raw values)
                 if let handler = adapter.changeHandler {

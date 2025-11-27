@@ -28,6 +28,9 @@ struct DashboardMainView: View {
     @State private var selectedDashboard: Dashboard?
     @State private var showingSettings = false
 
+    // MARK: - Settings
+    @AppStorage("searchPollingInterval") private var searchPollingInterval = 5.0
+
     // MARK: - Token Manager
     @StateObject private var tokenManager = DashboardTokenManager.shared
 
@@ -46,7 +49,7 @@ struct DashboardMainView: View {
         }
         .onAppear {
             autoSelectFirstDashboard()
-            SearchExecutionMonitor.shared.startMonitoring()
+            SearchExecutionMonitor.shared.startMonitoring(pollingInterval: searchPollingInterval)
         }
         .onChange(of: selectedDashboard) { _, newDashboard in
             if let dashboard = newDashboard, selectedMode == .render {
@@ -70,6 +73,25 @@ struct DashboardMainView: View {
         }
         .sheet(isPresented: $showingSettings) {
             DashboardSettingsView()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .autoStartCompleted)) { notification in
+            // Auto-start timers after initial dashboard load completes
+            guard let userInfo = notification.userInfo,
+                  let dashboardIdString = userInfo["dashboardId"] as? String,
+                  let dashboardId = UUID(uuidString: dashboardIdString) else {
+                print("⚠️ Failed to extract dashboard ID from autoStartCompleted notification")
+                return
+            }
+
+            print("🔔 AutoStart completed for dashboard: \(dashboardId)")
+
+            // Start timers for this dashboard after a brief delay
+            // to ensure first searches have started executing
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                print("⏰ Starting refresh timers after auto-start...")
+                await DashboardRefreshWorker.shared.startTimersForDashboard(dashboardId)
+            }
         }
     }
 

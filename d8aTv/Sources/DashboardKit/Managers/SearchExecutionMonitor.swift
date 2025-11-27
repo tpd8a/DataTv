@@ -72,7 +72,7 @@ public class SearchExecutionMonitor: ObservableObject {
     // MARK: - Monitoring Control
 
     /// Start monitoring active executions
-    public func startMonitoring(pollingInterval: TimeInterval = 2.0) {
+    public func startMonitoring(pollingInterval: TimeInterval = 5.0) {
         guard !isMonitoring else { return }
 
         isMonitoring = true
