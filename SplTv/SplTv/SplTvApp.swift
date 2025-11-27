@@ -19,8 +19,11 @@ import UniformTypeIdentifiers
 struct SplTvApp: App {
     
     // MARK: - Core Data Context
-    
-    public let persistenceController = PersistenceController.shared
+
+    // Use CoreDataManager's context to ensure consistency with dashboard sync
+    private var managedObjectContext: NSManagedObjectContext {
+        CoreDataManager.shared.viewContext
+    }
     
     
     // MARK: - Scene
@@ -28,7 +31,7 @@ struct SplTvApp: App {
         #if os(macOS)
         WindowGroup {
             DashboardMainView()
-                .environment(\.managedObjectContext, persistenceController.context)
+                .environment(\.managedObjectContext, managedObjectContext)
                 .frame(minWidth: 800, minHeight: 600)
         }
         .commands {
@@ -53,13 +56,13 @@ struct SplTvApp: App {
         
         Settings {
             SettingsView()
-                .environment(\.managedObjectContext, persistenceController.context)
+                .environment(\.managedObjectContext, managedObjectContext)
         }
         
         #elseif os(tvOS)
         WindowGroup {
             DashboardMainView()
-                .environment(\.managedObjectContext, persistenceController.context)
+                .environment(\.managedObjectContext, managedObjectContext)
         }
         #endif
     }
@@ -955,7 +958,7 @@ struct SettingsView: View {
     }
 
     private func clearAllCoreData() {
-        let context = PersistenceController.shared.context
+        let context = CoreDataManager.shared.viewContext
 
         // Delete all DashboardKit entities
         let entityNames = [
