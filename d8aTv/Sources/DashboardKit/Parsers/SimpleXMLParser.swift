@@ -42,6 +42,13 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
     private var currentInputChoices: [SimpleXMLInputChoice] = []
     private var inInputSearchBlock = false
 
+    // Formatting properties for inputs
+    private var currentInputPrefix: String?
+    private var currentInputSuffix: String?
+    private var currentInputValuePrefix: String?
+    private var currentInputValueSuffix: String?
+    private var currentInputDelimiter: String?
+
     // Change handler parsing state
     private var inChangeBlock = false
     private var inConditionBlock = false
@@ -106,6 +113,11 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
         currentInputAttributes = [:]
         currentInputChoices = []
         inInputSearchBlock = false
+        currentInputPrefix = nil
+        currentInputSuffix = nil
+        currentInputValuePrefix = nil
+        currentInputValueSuffix = nil
+        currentInputDelimiter = nil
         inChangeBlock = false
         inConditionBlock = false
         currentChangeActions = []
@@ -205,6 +217,11 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
             currentChangeActions = []
             currentConditions = []
             inInputSearchBlock = false
+            currentInputPrefix = nil
+            currentInputSuffix = nil
+            currentInputValuePrefix = nil
+            currentInputValueSuffix = nil
+            currentInputDelimiter = nil
         case "change":
             inChangeBlock = true
             currentChangeActions = []
@@ -353,6 +370,31 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
                 currentInputFieldForValue = currentCharacters
             }
 
+        case "prefix":
+            if elementStack.count > 1 && elementStack[elementStack.count - 2] == "input" {
+                currentInputPrefix = currentCharacters
+            }
+
+        case "suffix":
+            if elementStack.count > 1 && elementStack[elementStack.count - 2] == "input" {
+                currentInputSuffix = currentCharacters
+            }
+
+        case "valuePrefix":
+            if elementStack.count > 1 && elementStack[elementStack.count - 2] == "input" {
+                currentInputValuePrefix = currentCharacters
+            }
+
+        case "valueSuffix":
+            if elementStack.count > 1 && elementStack[elementStack.count - 2] == "input" {
+                currentInputValueSuffix = currentCharacters
+            }
+
+        case "delimiter":
+            if elementStack.count > 1 && elementStack[elementStack.count - 2] == "input" {
+                currentInputDelimiter = currentCharacters
+            }
+
         case "search":
             // Use accumulated values from child elements or saved search attributes
             print("🔍 Parser: Creating search with base=\(searchAttributes["base"] ?? "nil"), ref=\(searchAttributes["ref"] ?? "nil"), id=\(searchAttributes["id"] ?? "nil")")
@@ -447,7 +489,12 @@ public class SimpleXMLParser: NSObject, XMLParserDelegate {
                 changeHandler: changeHandler,
                 search: currentInputSearch,
                 fieldForLabel: currentInputFieldForLabel,
-                fieldForValue: currentInputFieldForValue
+                fieldForValue: currentInputFieldForValue,
+                prefix: currentInputPrefix,
+                suffix: currentInputSuffix,
+                valuePrefix: currentInputValuePrefix,
+                valueSuffix: currentInputValueSuffix,
+                delimiter: currentInputDelimiter
             )
 
             if changeHandler != nil {
