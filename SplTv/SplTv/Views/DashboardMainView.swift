@@ -46,6 +46,7 @@ struct DashboardMainView: View {
         }
         .onAppear {
             autoSelectFirstDashboard()
+            SearchExecutionMonitor.shared.startMonitoring()
         }
         .onChange(of: selectedDashboard) { _, newDashboard in
             if let dashboard = newDashboard, selectedMode == .render {
