@@ -50,11 +50,21 @@ struct DashboardMainView: View {
         .onChange(of: selectedDashboard) { _, newDashboard in
             if let dashboard = newDashboard, selectedMode == .render {
                 tokenManager.loadTokens(for: dashboard)
+
+                // Evaluate autostart after tokens are loaded
+                Task {
+                    await DashboardAutoStartManager.shared.evaluateAutoStart(for: dashboard)
+                }
             }
         }
         .onChange(of: selectedMode) { _, newMode in
             if newMode == .render, let dashboard = selectedDashboard {
                 tokenManager.loadTokens(for: dashboard)
+
+                // Evaluate autostart after tokens are loaded
+                Task {
+                    await DashboardAutoStartManager.shared.evaluateAutoStart(for: dashboard)
+                }
             }
         }
         .sheet(isPresented: $showingSettings) {
