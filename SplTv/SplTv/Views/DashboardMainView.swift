@@ -306,40 +306,6 @@ struct DashboardRowView: View {
 
 // MARK: - Preview
 
-// MARK: - Dashboard Settings View (Stub)
-
-/// Placeholder settings view - TODO: Implement full settings UI
-struct DashboardSettingsView: View {
-    @Environment(\.dismiss) private var dismiss
-    @StateObject private var settings = DashboardMonitorSettings.shared
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("Cell Change Highlighting") {
-                    Text("Settings UI coming soon")
-                        .foregroundStyle(.secondary)
-                }
-
-                Section("Table Appearance") {
-                    Text("Font, colors, and spacing controls")
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle("Dashboard Settings")
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        settings.saveSettings()
-                        dismiss()
-                    }
-                }
-            }
-        }
-        .frame(minWidth: 500, minHeight: 400)
-    }
-}
-
 #if DEBUG
 @available(macOS 26, tvOS 26, *)
 struct DashboardMainView_Previews: PreviewProvider {
